@@ -37,8 +37,8 @@ html, body {
 .panel {
   position: absolute;
   z-index: 1000;
-  top: 12px;
-  left: 12px;
+  top: calc(12px + env(safe-area-inset-top));
+  left: calc(12px + env(safe-area-inset-left));
   max-width: calc(100% - 24px);
   width: 290px;
   padding: 10px 14px;
@@ -374,3 +374,6 @@ html, body {
   .route-stop { grid-template-columns: 22px 1fr; }
   .route-stop-times { grid-column: 2; justify-items: start; text-align: left; }
 }
+
+.leaflet-top.leaflet-right { margin-top: env(safe-area-inset-top); margin-right: env(safe-area-inset-right); }
+.leaflet-bottom { margin-bottom: env(safe-area-inset-bottom); }

@@ -130,7 +130,7 @@ function trainActionsHtml(train, url) {
 
 function trainShareUrl(train) {
   const identifier = trainIdentifier(train);
-  return identifier && train.serviceDate ? appUrl({ follow: identifier, date: train.serviceDate }) : null;
+  return identifier ? appUrl({ follow: identifier }) : null;
 }
 
 function stationShareUrl(station) {
@@ -747,4 +747,13 @@ async function start() {
   else if (shared.query) runSearch({ focusIfUnambiguous: !shared.view });
 }
 
+function registerServiceWorker() {
+  if (!("serviceWorker" in navigator)) return;
+  navigator.serviceWorker.register("sw.js").catch((err) => console.warn("Service worker nie został zarejestrowany:", err));
+}
+
+window.addEventListener("offline", () => { statusEl.textContent = "Brak połączenia z internetem – dane nie są aktualne."; });
+window.addEventListener("online", () => refresh());
+
+registerServiceWorker();
 start();

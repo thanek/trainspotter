@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import logging
+import mimetypes
 from contextlib import asynccontextmanager
 from datetime import date, datetime
 
@@ -16,6 +17,7 @@ from .models import SearchResponse, SearchResult, SourceInfo, StationInfo, Train
 from .static_db import NotReady
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s: %(message)s")
+mimetypes.add_type("application/manifest+json", ".webmanifest")
 
 
 @asynccontextmanager

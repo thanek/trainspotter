@@ -33,12 +33,29 @@ Dane (baza SQLite z rozkładem) są trzymane w wolumenie `trainspotter-data`.
 Geolokalizacja w przeglądarce wymaga HTTPS (albo `localhost`). Przy wdrożeniu
 na serwer postaw przed kontenerem reverse proxy z TLS.
 
+## PWA
+
+Aplikację można zainstalować na telefonie lub komputerze („Dodaj do ekranu głównego” / ikona instalacji
+w pasku adresu). Instalacja i service worker wymagają HTTPS (wyjątek: `localhost`).
+
+- `frontend/manifest.webmanifest`: nazwa, kolory, ikony (w tym maskowalna dla Androida).
+- `frontend/sw.js`: powłoka aplikacji (HTML, JS, CSS, ikony) jest pobierana z sieci, a z keszu tylko bez połączenia.
+  Wersjonowany Leaflet jest keszowany na stałe. Dane `/api/` i kafelki mapy zawsze idą do sieci.
+- Ikony są generowane z `frontend/icons/icon.svg` (ImageMagick), np.
+  `magick -background none -density 300 frontend/icons/icon.svg -resize 192x192 frontend/icons/icon-192.png`.
+  Wersja maskowalna i `apple-touch-icon` to ten sam rysunek bez zaokrąglonych rogów.
+- Favicon ma osobny, pogrubiony rysunek (`frontend/icons/favicon.svg`), czytelny w 16 px;
+  `frontend/favicon.ico` zawiera rozmiary 16, 32 i 48 px wyrenderowane z tego pliku.
+
 ## API
 
 | Endpoint | Opis |
 |---|---|
 | `GET /api/v1/trains?bbox=minLon,minLat,maxLon,maxLat[&at=ISO][&include_bus=true]` | Pociągi w obszarze jako GeoJSON `FeatureCollection` |
-| `GET /api/v1/trains/{trainId}` | Szczegóły kursu: stacje z czasami planowymi i rzeczywistymi, kształt trasy, bieżąca pozycja |
+| `GET /api/v1/trains/{trainId}` | Szczegóły kursu: stacje z czasami planowymi i rzeczywistymi, opóźnieniami i postępem, kształt trasy, bieżąca pozycja |
+| `GET /api/v1/search?q=…` | Wyszukiwanie stacji i pociągów (nazwa, numer, `KW-77426`) |
+| `GET /api/v1/follow?carrier=IC&number=8312[&date=YYYY-MM-DD]` | Kurs o dokładnym numerze – do linków „Udostępnij” |
+| `GET /api/v1/stations/{stationId}` | Stacja (nazwa, współrzędne) |
 | `GET /api/v1/sources` | Stan źródeł danych |
 | `GET /api/v1/health` | Healthcheck |
 

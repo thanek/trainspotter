@@ -2,8 +2,18 @@
 <html lang="pl">
 <head>
   <meta charset="utf-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <meta name="description" content="Mapa pociągów w Polsce na żywo: pozycje, opóźnienia, trasy i stacje.">
+  <meta name="theme-color" content="#2563eb">
+  <meta name="mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-title" content="Trainspotter">
+  <meta name="apple-mobile-web-app-status-bar-style" content="default">
   <title>Trainspotter</title>
+  <link rel="manifest" href="manifest.webmanifest">
+  <link rel="icon" href="favicon.ico" sizes="32x32">
+  <link rel="icon" href="icons/favicon.svg" type="image/svg+xml">
+  <link rel="apple-touch-icon" href="icons/apple-touch-icon.png">
   <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css">
   <link rel="stylesheet" href="style.css">
 </head>
@@ -12,7 +22,7 @@
   <aside class="panel">
     <h1>Trainspotter</h1>
     <form id="search-form" class="search" role="search">
-      <input id="search-input" type="search" placeholder="Pociąg (nazwa, numer) lub stacja" aria-label="Szukaj pociągu lub stacji"
+      <input id="search-input" type="search" placeholder="Pociąg lub stacja" aria-label="Szukaj pociągu lub stacji"
              autocomplete="off" spellcheck="false">
       <button type="submit">Szukaj</button>
     </form>
