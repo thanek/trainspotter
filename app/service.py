@@ -406,14 +406,28 @@ def _by_relevance(result: dict) -> tuple:
 STATION_RESULT_LIMIT = 10
 
 
-def _station_result(station: sqlite3.Row, query: SearchQuery) -> dict:
+def _station_info(station: sqlite3.Row) -> dict:
     return {
         "stationId": station["station_id"],
-        "exactMatch": query.is_exact_name(station["name"]),
         "name": station["name"],
         "coordinates": [round(station["lon"], 6), round(station["lat"], 6)],
         "tripCount": station["trip_count"],
     }
+
+
+def _station_result(station: sqlite3.Row, query: SearchQuery) -> dict:
+    return {**_station_info(station), "exactMatch": query.is_exact_name(station["name"])}
+
+
+def _station(station_id: str) -> dict | None:
+    with static.connect() as con:
+        station = static.station(con, station_id) if static.schema_is_current() else None
+        return _station_info(station) if station else None
+
+
+async def station_detail(station_id: str) -> dict | None:
+    _require_static()
+    return await asyncio.to_thread(_station, station_id)
 
 
 def _search_stations(con: sqlite3.Connection, query: SearchQuery) -> list[dict]:

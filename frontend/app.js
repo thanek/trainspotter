@@ -111,14 +111,21 @@ function trainIdentifier({ carrierId, number }) {
   return carrierId && number ? `${carrierId}-${number.split("/")[0]}` : null;
 }
 
-function shareUrl(train) {
-  const params = new URLSearchParams({ follow: trainIdentifier(train), date: train.serviceDate });
-  return `${location.origin}${location.pathname}?${params}`;
+function appUrl(params) {
+  return `${location.origin}${location.pathname}?${new URLSearchParams(params)}`;
 }
 
-function shareButtonHtml(train) {
-  if (!train.carrierId || !train.number || !train.serviceDate) return "";
-  return `<button type="button" class="share-button" data-url="${escapeHtml(shareUrl(train))}">Udostępnij</button>`;
+function shareButtonHtml(url) {
+  return url ? `<button type="button" class="share-button" data-url="${escapeHtml(url)}">Udostępnij</button>` : "";
+}
+
+function trainShareUrl(train) {
+  const identifier = trainIdentifier(train);
+  return identifier && train.serviceDate ? appUrl({ follow: identifier, date: train.serviceDate }) : null;
+}
+
+function stationShareUrl(station) {
+  return appUrl({ station: station.stationId });
 }
 
 function popupHtml(p) {
@@ -138,7 +145,7 @@ function popupHtml(p) {
     ${segment}
     <p class="muted">Pozycja: ${escapeHtml(BASIS_LABEL[basisOf(p)])}<br>
       Źródło: ${escapeHtml(position.source)}${observed}</p>
-    ${shareButtonHtml(p)}
+    ${shareButtonHtml(trainShareUrl(p))}
   </div>`;
 }
 
@@ -199,6 +206,7 @@ const urlState = {
       query: params.get("q") ?? "",
       trainId: params.get("train"),
       follow: parseFollowParam(params.get("follow"), params.get("date")),
+      stationId: params.get("station"),
     };
   },
   write(changes) {
@@ -512,7 +520,7 @@ function notRunningPopupHtml(result) {
     <p class="muted">${escapeHtml(result.carrier)}</p>
     <p>${escapeHtml(result.origin)} → ${escapeHtml(result.destination)}</p>
     <p>${escapeHtml(positionText(result))}</p>
-    ${shareButtonHtml(result)}
+    ${shareButtonHtml(trainShareUrl(result))}
   </div>`;
 }
 
@@ -534,16 +542,26 @@ function focusResult(result) {
 
 const STATION_ZOOM = 15;
 const stationPopup = L.popup({ offset: [0, -4] });
-stationPopup.on("remove", clearAutoFilledSearchInput);
+stationPopup.on("remove", () => {
+  clearAutoFilledSearchInput();
+  urlState.write({ station: null });
+});
+
+function stationPopupHtml(station) {
+  return `<div class="popup">
+    <h2>${escapeHtml(station.name)}</h2>
+    <p class="muted">stacja kolejowa</p>
+    ${shareButtonHtml(stationShareUrl(station))}
+  </div>`;
+}
 
 function focusStation(station) {
   hideResults();
   const [lon, lat] = station.coordinates;
   map.setView([lat, lon], STATION_ZOOM);
-  stationPopup.setLatLng([lat, lon])
-    .setContent(`<div class="popup"><h2>${escapeHtml(station.name)}</h2><p class="muted">stacja kolejowa</p></div>`)
-    .openOn(map);
+  stationPopup.setLatLng([lat, lon]).setContent(stationPopupHtml(station)).openOn(map);
   showInSearchInput(station.name);
+  urlState.write({ station: station.stationId });
 }
 
 function focusEntry(entry) {
@@ -592,6 +610,12 @@ searchInput.addEventListener("keydown", (e) => {
   if (e.key === "Escape") hideResults();
 });
 
+async function focusSharedStation(stationId) {
+  const res = await fetch(`/api/v1/stations/${encodeURIComponent(stationId)}`);
+  if (res.ok) focusStation(await res.json());
+  else urlState.write({ station: null });
+}
+
 async function focusSharedTrain(trainId) {
   const res = await fetch(`/api/v1/trains/${encodeURIComponent(trainId)}`);
   const summary = res.ok ? (await res.json()).summary : null;
@@ -612,14 +636,15 @@ async function showInitialView(sharedView) {
 async function start() {
   const shared = urlState.read();
   searchInput.value = shared.query;
-  const linkFocusesTrain = Boolean(shared.follow || shared.trainId);
-  if (shared.view || !linkFocusesTrain) await showInitialView(shared.view);
+  const linkFocusesSomething = Boolean(shared.follow || shared.trainId || shared.stationId);
+  if (shared.view || !linkFocusesSomething) await showInitialView(shared.view);
   urlState.write(viewParams());
   map.on("moveend", () => urlState.write(viewParams()));
   map.on("moveend", debounce(refresh, MOVE_DEBOUNCE_MS));
   refresh();
   if (shared.follow) startFollowing(shared.follow);
   else if (shared.trainId) focusSharedTrain(shared.trainId);
+  else if (shared.stationId) focusSharedStation(shared.stationId);
   else if (shared.query) runSearch({ focusIfUnambiguous: !shared.view });
 }
 

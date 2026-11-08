@@ -12,7 +12,7 @@ from . import service
 from .config import settings
 from .geo import BBox
 from .gps import SOURCES
-from .models import SearchResponse, SearchResult, SourceInfo, TrainCollection
+from .models import SearchResponse, SearchResult, SourceInfo, StationInfo, TrainCollection
 from .static_db import NotReady
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s: %(message)s")
@@ -80,6 +80,14 @@ async def follow(
     if result is None:
         raise HTTPException(404, "Nie znaleziono pociągu")
     return result
+
+
+@app.get("/api/v1/stations/{station_id}", response_model=StationInfo)
+async def station(station_id: str):
+    detail = await service.station_detail(station_id)
+    if detail is None:
+        raise HTTPException(404, "Nie znaleziono stacji")
+    return detail
 
 
 @app.get("/api/v1/sources", response_model=list[SourceInfo])

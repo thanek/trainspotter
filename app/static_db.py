@@ -409,6 +409,10 @@ class StaticData:
         return con.execute("SELECT * FROM stations").fetchall()
 
     @staticmethod
+    def station(con: sqlite3.Connection, station_id: str) -> sqlite3.Row | None:
+        return con.execute("SELECT * FROM stations WHERE station_id = ?", (station_id,)).fetchone()
+
+    @staticmethod
     def runs_on(con: sqlite3.Connection, service_id: str, service_date: str) -> bool:
         return con.execute(
             "SELECT 1 FROM service_dates WHERE date=? AND service_id=?", (service_date, service_id)
