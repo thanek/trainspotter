@@ -1,6 +1,12 @@
 import pytest
 
-from app.estimator import PLK_REPORTING_LAG_TOLERANCE_S, UNCONFIRMED_ORIGIN_HOLD_S, build_timeline, estimate
+from app.estimator import (
+    PLK_REPORTING_LAG_TOLERANCE_S,
+    UNCONFIRMED_ORIGIN_HOLD_S,
+    build_timeline,
+    estimate,
+    stop_progress,
+)
 from app.geo import Polyline
 from app.realtime import LiveStop, LiveTrip
 from app.static_db import StaticStop
@@ -105,3 +111,28 @@ def test_shape_interpolation_uses_distance_along_track():
     est = estimate(build_timeline(STOPS, DAY_START, None), at(300), has_live=False, shape=shape)
     assert est.method == "shape_interpolation"
     assert (est.lat, est.lon) == pytest.approx((52.1, 16.05))
+
+
+def test_stop_progress_while_moving_marks_departed_stops_as_passed():
+    est = estimate(build_timeline(STOPS, DAY_START, None), at(300), has_live=False)
+    assert stop_progress(3, est, finished=False) == ["passed", "upcoming", "upcoming"]
+
+
+def test_stop_progress_at_stop_marks_it_current():
+    est = estimate(build_timeline(STOPS, DAY_START, None), at(630), has_live=False)
+    assert stop_progress(3, est, finished=False) == ["passed", "current", "upcoming"]
+
+
+def test_stop_progress_when_held_keeps_awaited_stop_upcoming():
+    live = live_trip(
+        LiveStop(0, None, at(0), True, False),
+        LiveStop(1, at(600), at(660), False, False),
+    )
+    est = estimate(build_timeline(STOPS, DAY_START, live), at(600 + PLK_REPORTING_LAG_TOLERANCE_S + 60),
+                   has_live=True)
+    assert stop_progress(3, est, finished=False) == ["passed", "upcoming", "upcoming"]
+
+
+def test_stop_progress_without_estimate_depends_on_whether_trip_finished():
+    assert stop_progress(2, None, finished=True) == ["passed", "passed"]
+    assert stop_progress(2, None, finished=False) == ["upcoming", "upcoming"]

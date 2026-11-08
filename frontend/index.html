@@ -26,6 +26,20 @@
       <li><span class="dot ring"></span>Opóźnienie ≥ 5 min</li>
     </ul>
   </aside>
+  <dialog id="route-dialog" class="route-dialog" aria-labelledby="route-title">
+    <header class="route-header">
+      <div>
+        <h2 id="route-title"></h2>
+        <p id="route-subtitle" class="muted"></p>
+      </div>
+      <button type="button" class="dialog-close" aria-label="Zamknij">×</button>
+    </header>
+    <p class="route-legend muted">
+      <span class="delay-badge on-time">potwierdzone przez PLK</span>
+      <span class="delay-badge on-time forecast">prognoza</span>
+    </p>
+    <ol id="route-stops" class="route-stops"></ol>
+  </dialog>
   <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
   <script src="app.js"></script>
 </body>

@@ -119,6 +119,15 @@ function shareButtonHtml(url) {
   return url ? `<button type="button" class="share-button" data-url="${escapeHtml(url)}">Udostępnij</button>` : "";
 }
 
+function routeButtonHtml(trainId) {
+  if (!trainId || trainId.startsWith("gps:")) return "";
+  return `<button type="button" class="route-button" data-train-id="${escapeHtml(trainId)}">Trasa</button>`;
+}
+
+function trainActionsHtml(train, url) {
+  return `<div class="popup-actions">${shareButtonHtml(url)}${routeButtonHtml(train.trainId)}</div>`;
+}
+
 function trainShareUrl(train) {
   const identifier = trainIdentifier(train);
   return identifier && train.serviceDate ? appUrl({ follow: identifier, date: train.serviceDate }) : null;
@@ -145,7 +154,7 @@ function popupHtml(p) {
     ${segment}
     <p class="muted">Pozycja: ${escapeHtml(BASIS_LABEL[basisOf(p)])}<br>
       Źródło: ${escapeHtml(position.source)}${observed}</p>
-    ${shareButtonHtml(trainShareUrl(p))}
+    ${trainActionsHtml(p, trainShareUrl(p))}
   </div>`;
 }
 
@@ -370,6 +379,7 @@ async function refresh() {
   inFlight = new AbortController();
   try {
     if (followed?.trainId) await trackFollowedTrain().catch(() => null);
+    refreshRouteDialog().catch(() => null);
     const res = await fetch(`/api/v1/trains?bbox=${bboxParam()}`, { signal: inFlight.signal });
     if (res.status === 503) {
       statusEl.textContent = "Importuję rozkład jazdy…";
@@ -520,7 +530,7 @@ function notRunningPopupHtml(result) {
     <p class="muted">${escapeHtml(result.carrier)}</p>
     <p>${escapeHtml(result.origin)} → ${escapeHtml(result.destination)}</p>
     <p>${escapeHtml(positionText(result))}</p>
-    ${shareButtonHtml(trainShareUrl(result))}
+    ${trainActionsHtml(result, trainShareUrl(result))}
   </div>`;
 }
 
@@ -608,6 +618,95 @@ searchForm.addEventListener("submit", (e) => {
 searchInput.addEventListener("input", debounce(() => runSearch({ focusIfUnambiguous: false }), SEARCH_DEBOUNCE_MS));
 searchInput.addEventListener("keydown", (e) => {
   if (e.key === "Escape") hideResults();
+});
+
+const routeDialog = document.getElementById("route-dialog");
+const routeTitleEl = document.getElementById("route-title");
+const routeSubtitleEl = document.getElementById("route-subtitle");
+const routeStopsEl = document.getElementById("route-stops");
+let routeDialogTrainId = null;
+
+const STOP_PROGRESS_LABEL = { current: "pociąg na stacji", next: "następna stacja" };
+const TIME_BASIS_TITLE = { confirmed: "potwierdzone przez PLK", forecast: "prognoza PLK" };
+
+function delayBadgeHtml(delay, basis) {
+  const forecastClass = basis === "forecast" ? " forecast" : "";
+  const title = escapeHtml(TIME_BASIS_TITLE[basis]);
+  if (delay === 0) return `<span class="delay-badge on-time${forecastClass}" title="${title}">o czasie</span>`;
+  const severity = delay < 0 ? "early" : delay >= LATE_THRESHOLD_MIN ? "late" : "slight";
+  const text = delay > 0 ? `+${delay} min` : `−${-delay} min`;
+  return `<span class="delay-badge ${severity}${forecastClass}" title="${title}">${text}</span>`;
+}
+
+function stopTimeHtml(label, scheduled, actual, delay, basis) {
+  const labelHtml = `<span class="route-time-label">${label}</span>`;
+  if (basis === "schedule" || delay == null) {
+    return `<span class="route-time">${labelHtml} ${clockTime(scheduled ?? actual)}</span>`;
+  }
+  const scheduledHtml = delay !== 0 ? `<s>${clockTime(scheduled)}</s> ` : "";
+  return `<span class="route-time">${labelHtml} ${scheduledHtml}${clockTime(actual)} ${delayBadgeHtml(delay, basis)}</span>`;
+}
+
+function displayProgress(stops) {
+  const firstUpcoming = stops.findIndex((s) => s.progress === "upcoming");
+  const trainIsUnderway = stops.some((s) => s.progress !== "upcoming");
+  return stops.map((s, i) => (i === firstUpcoming && trainIsUnderway ? "next" : s.progress));
+}
+
+function routeStopHtml(stop, progress, index, count) {
+  const arrival = index === 0 ? "" : stopTimeHtml("przyj.", stop.scheduledArrival, stop.arrival,
+    stop.arrivalDelayMinutes, stop.timeBasis);
+  const departure = index === count - 1 ? "" : stopTimeHtml("odj.", stop.scheduledDeparture, stop.departure,
+    stop.departureDelayMinutes, stop.timeBasis);
+  const label = STOP_PROGRESS_LABEL[progress];
+  return `<li class="route-stop ${progress}">
+    <span class="route-dot" aria-hidden="true"></span>
+    <span class="route-stop-name">${escapeHtml(stop.name)}${label ? `<span class="route-stop-label">${label}</span>` : ""}</span>
+    <span class="route-stop-times">${arrival}${departure}</span>
+  </li>`;
+}
+
+function renderRouteDialog(detail) {
+  const summary = detail.summary;
+  routeTitleEl.textContent = [summary.category, summary.number, summary.name].filter(Boolean).join(" ");
+  routeSubtitleEl.textContent = `${summary.origin} → ${summary.destination} · ${summary.carrier ?? ""}`;
+  const progress = displayProgress(detail.stops);
+  routeStopsEl.innerHTML = detail.stops
+    .map((stop, i) => routeStopHtml(stop, progress[i], i, detail.stops.length))
+    .join("");
+}
+
+async function fetchTrainDetail(trainId) {
+  const res = await fetch(`/api/v1/trains/${encodeURIComponent(trainId)}`);
+  return res.ok ? res.json() : null;
+}
+
+async function openRouteDialog(trainId) {
+  const detail = await fetchTrainDetail(trainId);
+  if (!detail?.summary) return;
+  routeDialogTrainId = trainId;
+  renderRouteDialog(detail);
+  routeDialog.showModal();
+  routeStopsEl.querySelector(".current, .next")?.scrollIntoView({ block: "center" });
+}
+
+async function refreshRouteDialog() {
+  if (!routeDialog.open || !routeDialogTrainId) return;
+  const detail = await fetchTrainDetail(routeDialogTrainId);
+  if (!detail?.summary || !routeDialog.open) return;
+  const scrollTop = routeStopsEl.scrollTop;
+  renderRouteDialog(detail);
+  routeStopsEl.scrollTop = scrollTop;
+}
+
+routeDialog.querySelector(".dialog-close").addEventListener("click", () => routeDialog.close());
+routeDialog.addEventListener("click", (e) => {
+  if (e.target === routeDialog) routeDialog.close();
+});
+routeDialog.addEventListener("close", () => { routeDialogTrainId = null; });
+document.addEventListener("click", (e) => {
+  const button = e.target.closest(".route-button");
+  if (button) openRouteDialog(button.dataset.trainId);
 });
 
 async function focusSharedStation(stationId) {

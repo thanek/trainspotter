@@ -10,7 +10,7 @@ from typing import Callable
 from zoneinfo import ZoneInfo
 
 from .config import settings
-from .estimator import Estimate, StopPoint, build_detour_timeline, build_timeline, estimate
+from .estimator import Estimate, StopPoint, build_detour_timeline, build_timeline, estimate, stop_progress
 from .geo import BBox, Polyline
 from .gps import SOURCES, GpsFix, GpsSource
 from .realtime import LiveSnapshot, LiveTrip, PlkLiveFeed
@@ -297,11 +297,25 @@ async def trains_in_bbox(bbox: BBox, now: float | None = None, include_bus: bool
     }
 
 
-def _stop_view(s: StopPoint) -> dict:
+def _delay_minutes(actual: float, scheduled: float | None) -> int | None:
+    return round((actual - scheduled) / 60) if scheduled is not None else None
+
+
+def _time_basis(stop: StopPoint, has_live: bool) -> str:
+    if stop.confirmed:
+        return "confirmed"
+    return "forecast" if has_live else "schedule"
+
+
+def _stop_view(s: StopPoint, progress: str, has_live: bool) -> dict:
     return {
         "stopId": s.stop_id, "name": s.name, "coordinates": [s.lon, s.lat],
         "scheduledArrival": iso(s.scheduled_arr), "scheduledDeparture": iso(s.scheduled_dep),
         "arrival": iso(s.arr), "departure": iso(s.dep), "confirmed": s.confirmed,
+        "arrivalDelayMinutes": _delay_minutes(s.arr, s.scheduled_arr),
+        "departureDelayMinutes": _delay_minutes(s.dep, s.scheduled_dep),
+        "timeBasis": _time_basis(s, has_live),
+        "progress": progress,
     }
 
 
@@ -318,14 +332,16 @@ def _detail(train_id: str, now: float, snapshot: LiveSnapshot | None) -> dict | 
         cancelled = bool(live_trip and live_trip.cancelled)
         est = None if cancelled else estimate(tl, now, live_trip is not None, shape)
         route = shape.coordinates() if shape is not None else [[round(s.lon, 6), round(s.lat, 6)] for s in tl]
+        state = _run_state(tl, est, now, cancelled)
+        progress = stop_progress(len(tl), est, finished=state == "finished")
         return {
             "trainId": train_id,
             "cancelled": cancelled,
             "detour": run.on_detour,
             "current": _point_feature(est.lat, est.lon, _estimated_properties(trip, service_date, tl, est))
             if est else None,
-            "summary": _search_result(run, tl, est, _run_state(tl, est, now, cancelled)) if len(tl) >= 2 else None,
-            "stops": [_stop_view(s) for s in tl],
+            "summary": _search_result(run, tl, est, state) if len(tl) >= 2 else None,
+            "stops": [_stop_view(s, p, live_trip is not None) for s, p in zip(tl, progress)],
             "route": {"type": "LineString", "coordinates": route},
         }
 

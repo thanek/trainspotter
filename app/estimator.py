@@ -178,3 +178,16 @@ def estimate(tl: list[StopPoint], now: float, has_live: bool, shape: Polyline | 
         based_on=_basis(tl, loc, has_live, held, last_confirmed), method=method,
         delay_s=_delay_s(tl, loc), observed_at=_observed_at(tl, last_confirmed, now),
     )
+
+
+StopProgress = Literal["passed", "current", "upcoming"]
+
+
+def stop_progress(stop_count: int, est: Estimate | None, finished: bool) -> list[StopProgress]:
+    if est is None:
+        return ["passed" if finished else "upcoming"] * stop_count
+    if est.status == "at_stop":
+        return ["passed" if i < est.from_idx else "current" if i == est.from_idx else "upcoming"
+                for i in range(stop_count)]
+    first_not_passed = est.to_idx if est.status == "held" else est.from_idx + 1
+    return ["passed" if i < first_not_passed else "upcoming" for i in range(stop_count)]
