@@ -27,7 +27,8 @@ SCHEMA = """
 CREATE TABLE meta(key TEXT PRIMARY KEY, value TEXT);
 CREATE TABLE agencies(agency_id TEXT PRIMARY KEY, name TEXT);
 CREATE TABLE routes(route_id TEXT PRIMARY KEY, agency_id TEXT, short_name TEXT, long_name TEXT, route_type INTEGER);
-CREATE TABLE stops(stop_id TEXT PRIMARY KEY, name TEXT, lat REAL, lon REAL);
+CREATE TABLE stops(stop_id TEXT PRIMARY KEY, name TEXT, lat REAL, lon REAL, parent_station TEXT);
+CREATE TABLE stations(station_id TEXT PRIMARY KEY, name TEXT, lat REAL, lon REAL, trip_count INTEGER);
 CREATE TABLE trips(
   trip_idx INTEGER PRIMARY KEY, trip_id TEXT UNIQUE, route_id TEXT, service_id TEXT, shape_id TEXT,
   short_name TEXT, headsign TEXT, category TEXT, number TEXT, name TEXT, first_s INTEGER, last_s INTEGER);
@@ -37,6 +38,23 @@ CREATE TABLE stop_times(
   PRIMARY KEY(trip_idx, seq)) WITHOUT ROWID;
 CREATE TABLE shapes(shape_id TEXT PRIMARY KEY, data BLOB);
 CREATE VIRTUAL TABLE trip_rtree USING rtree(trip_idx, min_lon, max_lon, min_lat, max_lat);
+"""
+
+SCHEMA_VERSION = "2"
+
+STATIONS_FROM_RAIL_STOP_TIMES = """
+INSERT INTO stations
+SELECT served.station_id, s.name, s.lat, s.lon, COUNT(DISTINCT served.trip_idx)
+FROM (
+  SELECT COALESCE(NULLIF(p.parent_station, ''), p.stop_id) AS station_id, st.trip_idx
+  FROM stop_times st
+  JOIN stops p ON p.stop_id = st.stop_id
+  JOIN trips t ON t.trip_idx = st.trip_idx
+  JOIN routes r ON r.route_id = t.route_id
+  WHERE r.route_type != ?
+) served
+JOIN stops s ON s.stop_id = served.station_id
+GROUP BY served.station_id
 """
 
 TRIP_SELECT = """
@@ -151,7 +169,8 @@ def _import_reference_tables(con: sqlite3.Connection, zf: zipfile.ZipFile) -> di
     for r in _rows(zf, "stops.txt"):
         if r.get("stop_lat"):
             coords[r["stop_id"]] = (float(r["stop_lat"]), float(r["stop_lon"]))
-            con.execute("INSERT INTO stops VALUES(?,?,?,?)", (r["stop_id"], r["stop_name"], *coords[r["stop_id"]]))
+            con.execute("INSERT INTO stops VALUES(?,?,?,?,?)",
+                        (r["stop_id"], r["stop_name"], *coords[r["stop_id"]], r.get("parent_station") or None))
     con.executemany("INSERT INTO service_dates VALUES(?,?)", sorted(_expand_calendar(zf)))
     return coords
 
@@ -240,10 +259,12 @@ def build_database(zip_path: Path, db_path: Path) -> None:
             trip_idx = _import_trips(con, zf)
             _import_stop_times(con, zf, trip_idx, coords)
             _import_shapes(con, zf)
+            con.execute(STATIONS_FROM_RAIL_STOP_TIMES, (BUS_ROUTE_TYPE,))
             feed_version = next((r.get("feed_version") for r in _rows(zf, "feed_info.txt")), None)
         con.executemany(
             "INSERT INTO meta VALUES(?,?)",
-            [("feed_version", feed_version or ""), ("imported_at", str(time.time()))],
+            [("feed_version", feed_version or ""), ("imported_at", str(time.time())),
+             ("schema_version", SCHEMA_VERSION)],
         )
         con.commit()
     finally:
@@ -281,6 +302,8 @@ class StaticData:
         self.last_error: str | None = None
         self._shape_cache: dict[str, Polyline | None] = {}
         self._shape_cache_db_mtime: float | None = None
+        self._meta_cache: dict[str, str] = {}
+        self._meta_cache_db_mtime: float | None = None
 
     @property
     def ready(self) -> bool:
@@ -293,9 +316,12 @@ class StaticData:
     def age_s(self) -> float | None:
         return time.time() - self.db_path.stat().st_mtime if self.ready else None
 
+    def schema_is_current(self) -> bool:
+        return self.meta().get("schema_version") == SCHEMA_VERSION
+
     def ensure_fresh(self) -> None:
         age = self.age_s()
-        if age is not None and age < settings.static_max_age_s:
+        if age is not None and age < settings.static_max_age_s and self.schema_is_current():
             return
         with self._import_lock:
             if self._importing:
@@ -338,8 +364,12 @@ class StaticData:
     def meta(self) -> dict[str, str]:
         if not self.ready:
             return {}
-        with self.connect() as con:
-            return {r["key"]: r["value"] for r in con.execute("SELECT key, value FROM meta")}
+        mtime = self.db_path.stat().st_mtime
+        if self._meta_cache_db_mtime != mtime:
+            with self.connect() as con:
+                self._meta_cache = {r["key"]: r["value"] for r in con.execute("SELECT key, value FROM meta")}
+            self._meta_cache_db_mtime = mtime
+        return self._meta_cache
 
     @staticmethod
     def trips_possibly_running_in(con: sqlite3.Connection, bbox: BBox, service_date: str, now_s: float,
@@ -373,6 +403,10 @@ class StaticData:
             """,
             (service_date, BUS_ROUTE_TYPE),
         ).fetchall()
+
+    @staticmethod
+    def stations(con: sqlite3.Connection) -> list[sqlite3.Row]:
+        return con.execute("SELECT * FROM stations").fetchall()
 
     @staticmethod
     def runs_on(con: sqlite3.Connection, service_id: str, service_date: str) -> bool:

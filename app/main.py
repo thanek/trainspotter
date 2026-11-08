@@ -64,9 +64,10 @@ async def train(train_id: str, at: datetime | None = None):
 
 @app.get("/api/v1/search", response_model=SearchResponse)
 async def search(
-    q: str = Query(..., min_length=2, max_length=60, description="Nazwa lub numer pociągu, np. „szkuner”, „IC 3822”"),
+    q: str = Query(..., min_length=2, max_length=60,
+                   description="Nazwa lub numer pociągu albo nazwa stacji, np. „szkuner”, „IC 3822”, „Poznań Główny”"),
 ):
-    return {"query": q, "results": await service.search_trains(q)}
+    return {"query": q, **await service.search(q)}
 
 
 @app.get("/api/v1/follow", response_model=SearchResult)

@@ -84,9 +84,18 @@ class SearchResult(BaseModel):
     train: TrainFeature | None = Field(None, description="Bieżąca pozycja; tylko dla state=running")
 
 
+class StationResult(BaseModel):
+    stationId: str
+    exactMatch: bool = Field(description="Nazwa stacji jest dokładnie frazą wyszukiwania")
+    name: str
+    coordinates: tuple[float, float]
+    tripCount: int = Field(description="Liczba kursów kolejowych w rozkładzie – miara wielkości stacji")
+
+
 class SearchResponse(BaseModel):
     query: str
-    results: list[SearchResult]
+    stations: list[StationResult]
+    results: list[SearchResult] = Field(description="Pociągi")
 
 
 class TrainCollection(BaseModel):

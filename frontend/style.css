@@ -206,3 +206,13 @@ html, body {
   border-radius: 6px;
   cursor: pointer;
 }
+
+.result-section {
+  padding: 4px 8px;
+  font-size: 11px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--muted);
+  background: rgba(127, 127, 127, 0.08);
+}

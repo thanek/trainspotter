@@ -14,7 +14,7 @@ from .estimator import Estimate, StopPoint, build_detour_timeline, build_timelin
 from .geo import BBox, Polyline
 from .gps import SOURCES, GpsFix, GpsSource
 from .realtime import LiveSnapshot, LiveTrip, PlkLiveFeed
-from .search import TrainQuery, expand_slash_numbers
+from .search import SearchQuery, expand_slash_numbers
 from .static_db import NotReady, StaticData
 
 log = logging.getLogger(__name__)
@@ -403,16 +403,42 @@ def _by_relevance(result: dict) -> tuple:
     return SEARCH_STATE_ORDER[result["state"]], result["departure"]
 
 
-def _search(query: TrainQuery, now: float, snapshot: LiveSnapshot | None) -> list[dict]:
+STATION_RESULT_LIMIT = 10
+
+
+def _station_result(station: sqlite3.Row, query: SearchQuery) -> dict:
+    return {
+        "stationId": station["station_id"],
+        "exactMatch": query.is_exact_name(station["name"]),
+        "name": station["name"],
+        "coordinates": [round(station["lon"], 6), round(station["lat"], 6)],
+        "tripCount": station["trip_count"],
+    }
+
+
+def _search_stations(con: sqlite3.Connection, query: SearchQuery) -> list[dict]:
+    if not static.schema_is_current():
+        return []
+    matching = [s for s in static.stations(con) if query.matches_name(s["name"])]
+    matching.sort(key=lambda s: (*query.name_rank(s["name"]), -s["trip_count"]))
+    return [_station_result(s, query) for s in matching[:STATION_RESULT_LIMIT]]
+
+
+def _search_trains(con: sqlite3.Connection, query: SearchQuery, now: float,
+                   snapshot: LiveSnapshot | None) -> list[dict]:
     today = datetime.fromtimestamp(now, TZ).strftime("%Y%m%d")
 
     def matches(trip: sqlite3.Row) -> bool:
-        return query.matches(trip["name"], trip["number"], trip["category"])
+        return query.matches_train(trip["name"], trip["number"], trip["category"], trip["agency_id"])
 
-    with static.connect() as con:
-        runs = _matching_runs(con, _today_and_yesterday(now), snapshot, matches)
-        results = [r for run, r in _evaluate(con, runs, now) if r["state"] == "running" or run.service_date == today]
+    runs = _matching_runs(con, _today_and_yesterday(now), snapshot, matches)
+    results = [r for run, r in _evaluate(con, runs, now) if r["state"] == "running" or run.service_date == today]
     return sorted(results, key=_by_relevance)[:SEARCH_RESULT_LIMIT]
+
+
+def _search(query: SearchQuery, now: float, snapshot: LiveSnapshot | None) -> dict:
+    with static.connect() as con:
+        return {"stations": _search_stations(con, query), "results": _search_trains(con, query, now, snapshot)}
 
 
 def _follow(carrier_id: str, number: str, service_day: date | None, now: float,
@@ -433,10 +459,10 @@ async def follow_train(carrier_id: str, number: str, service_day: date | None = 
     return await asyncio.to_thread(_follow, carrier_id, number, service_day, now, await _usable_snapshot(now))
 
 
-async def search_trains(raw_query: str, now: float | None = None) -> list[dict]:
+async def search(raw_query: str, now: float | None = None) -> dict:
     _require_static()
     now = now or time.time()
-    query = TrainQuery.parse(raw_query)
+    query = SearchQuery.parse(raw_query)
     if not query.tokens:
-        return []
+        return {"stations": [], "results": []}
     return await asyncio.to_thread(_search, query, now, await _usable_snapshot(now))
