@@ -107,6 +107,16 @@ const STATUS_LABEL = {
   unknown: "",
 };
 
+function shareUrl({ carrierId, number, serviceDate }) {
+  const params = new URLSearchParams({ follow: `${carrierId}-${number.split("/")[0]}`, date: serviceDate });
+  return `${location.origin}${location.pathname}?${params}`;
+}
+
+function shareButtonHtml(train) {
+  if (!train.carrierId || !train.number || !train.serviceDate) return "";
+  return `<button type="button" class="share-button" data-url="${escapeHtml(shareUrl(train))}">Udostępnij</button>`;
+}
+
 function popupHtml(p) {
   const position = p.position;
   const est = position.estimate;
@@ -124,28 +134,151 @@ function popupHtml(p) {
     ${segment}
     <p class="muted">Pozycja: ${escapeHtml(BASIS_LABEL[basisOf(p)])}<br>
       Źródło: ${escapeHtml(position.source)}${observed}</p>
+    ${shareButtonHtml(p)}
   </div>`;
 }
 
-async function showRoute(trainId) {
-  routeLayer.clearLayers();
-  if (trainId.startsWith("gps:")) return;
-  const res = await fetch(`/api/v1/trains/${encodeURIComponent(trainId)}`);
-  if (!res.ok || selectedTrainId !== trainId) return;
-  const detail = await res.json();
-  const latLngs = detail.route.coordinates.map(([lon, lat]) => [lat, lon]);
-  L.polyline(latLngs, { color: color("--route"), weight: 4, opacity: 0.8, interactive: false }).addTo(routeLayer);
+const SHARE_FEEDBACK_MS = 2000;
+
+function copyWithTextarea(text) {
+  const area = document.createElement("textarea");
+  area.value = text;
+  area.style.position = "fixed";
+  area.style.opacity = "0";
+  document.body.appendChild(area);
+  area.select();
+  const copied = document.execCommand("copy");
+  area.remove();
+  return copied;
 }
 
+async function copyToClipboard(text) {
+  if (navigator.clipboard && window.isSecureContext) {
+    await navigator.clipboard.writeText(text);
+    return true;
+  }
+  return copyWithTextarea(text);
+}
+
+document.addEventListener("click", async (e) => {
+  const button = e.target.closest(".share-button");
+  if (!button) return;
+  const url = button.dataset.url;
+  const copied = await copyToClipboard(url).catch(() => false);
+  if (!copied) {
+    window.prompt("Skopiuj link do pociągu:", url);
+    return;
+  }
+  button.textContent = "Skopiowano link ✓";
+  setTimeout(() => { button.textContent = "Udostępnij"; }, SHARE_FEEDBACK_MS);
+});
+
+async function showRoute(trainId) {
+  routeLayer.clearLayers();
+  if (trainId.startsWith("gps:")) return null;
+  const res = await fetch(`/api/v1/trains/${encodeURIComponent(trainId)}`);
+  if (!res.ok || selectedTrainId !== trainId) return null;
+  const detail = await res.json();
+  const latLngs = detail.route.coordinates.map(([lon, lat]) => [lat, lon]);
+  const line = L.polyline(latLngs, { color: color("--route"), weight: 6, opacity: 0.85, interactive: false });
+  line.addTo(routeLayer);
+  return { bounds: line.getBounds(), stops: detail.stops };
+}
+
+const urlState = {
+  read() {
+    const params = new URLSearchParams(location.search);
+    const [lat, lon, zoom] = ["lat", "lon", "z"].map((k) => Number.parseFloat(params.get(k)));
+    const viewIsValid = Math.abs(lat) <= 90 && Math.abs(lon) <= 180 && zoom >= 0 && zoom <= 19;
+    return {
+      view: viewIsValid ? { lat, lon, zoom } : null,
+      query: params.get("q") ?? "",
+      trainId: params.get("train"),
+      follow: parseFollowParam(params.get("follow"), params.get("date")),
+    };
+  },
+  write(changes) {
+    const params = new URLSearchParams(location.search);
+    for (const [key, value] of Object.entries(changes)) {
+      if (value) params.set(key, value);
+      else params.delete(key);
+    }
+    const search = params.toString();
+    history.replaceState(null, "", search ? `?${search}` : location.pathname);
+  },
+};
+
+function viewParams() {
+  const center = map.getCenter();
+  return { lat: center.lat.toFixed(5), lon: center.lng.toFixed(5), z: String(map.getZoom()) };
+}
+
+const FOLLOW_PARAM = /^([A-Za-z0-9]{1,8})-([0-9]{1,6})$/;
+const ISO_DATE = /^\d{4}-\d{2}-\d{2}$/;
+const FOLLOW_KEEP_IN_VIEW_PADDING = -0.2;
+let followed = null;
+
+function parseFollowParam(raw, date) {
+  const match = FOLLOW_PARAM.exec(raw ?? "");
+  if (!match) return null;
+  return { carrier: match[1], number: match[2], date: ISO_DATE.test(date ?? "") ? date : null, trainId: null };
+}
+
+function stopFollowing() {
+  if (!followed) return;
+  followed = null;
+  urlState.write({ follow: null, date: null });
+}
+
+async function resolveFollowed() {
+  const params = new URLSearchParams({ carrier: followed.carrier, number: followed.number });
+  if (followed.date) params.set("date", followed.date);
+  const res = await fetch(`/api/v1/follow?${params}`);
+  return res.ok ? res.json() : null;
+}
+
+async function trackFollowedTrain() {
+  const result = await resolveFollowed();
+  if (!followed || !result || result.trainId !== followed.trainId) return;
+  if (!result.train) {
+    trainPopup.setContent(notRunningPopupHtml(result));
+    return;
+  }
+  const [lon, lat] = result.train.geometry.coordinates;
+  trainPopup.setLatLng([lat, lon]).setContent(popupHtml(result.train.properties));
+  if (!map.getBounds().pad(FOLLOW_KEEP_IN_VIEW_PADDING).contains([lat, lon])) map.panTo([lat, lon]);
+}
+
+async function startFollowing(follow) {
+  followed = follow;
+  const result = await resolveFollowed().catch(() => null);
+  if (!result) {
+    statusEl.textContent = `Nie znaleziono pociągu ${follow.carrier} ${follow.number}.`;
+    stopFollowing();
+    return;
+  }
+  followed.trainId = result.trainId;
+  focusResult(result);
+}
+
+function setSelectedTrain(trainId) {
+  if (followed?.trainId && trainId !== followed.trainId) stopFollowing();
+  selectedTrainId = trainId;
+  urlState.write({ train: trainId });
+}
+
+map.on("dragstart", stopFollowing);
+
 function selectTrain(feature) {
-  selectedTrainId = feature.properties.trainId;
+  setSelectedTrain(feature.properties.trainId);
   const [lon, lat] = feature.geometry.coordinates;
   trainPopup.setLatLng([lat, lon]).setContent(popupHtml(feature.properties)).openOn(map);
   showRoute(selectedTrainId);
 }
 
 map.on("popupclose", () => {
-  selectedTrainId = null;
+  stopFollowing();
+  setSelectedTrain(null);
   routeLayer.clearLayers();
 });
 
@@ -208,11 +341,20 @@ function describeSources(sources) {
   return live && live.status !== "ok" ? ` · dane live: ${live.status}` : "";
 }
 
+function trainCountText(n) {
+  if (n === 1) return "1 pociąg";
+  const lastDigit = n % 10;
+  const lastTwoDigits = n % 100;
+  const isPaucal = lastDigit >= 2 && lastDigit <= 4 && !(lastTwoDigits >= 12 && lastTwoDigits <= 14);
+  return `${n} ${isPaucal ? "pociągi" : "pociągów"}`;
+}
+
 async function refresh() {
   clearTimeout(refreshTimer);
   inFlight?.abort();
   inFlight = new AbortController();
   try {
+    if (followed?.trainId) await trackFollowedTrain().catch(() => null);
     const res = await fetch(`/api/v1/trains?bbox=${bboxParam()}`, { signal: inFlight.signal });
     if (res.status === 503) {
       statusEl.textContent = "Importuję rozkład jazdy…";
@@ -224,7 +366,9 @@ async function refresh() {
     render(data);
     const time = new Date(data.generatedAt).toLocaleTimeString("pl-PL");
     const overview = data.mode === "overview" ? " · widok uproszczony" : "";
-    statusEl.textContent = `${data.features.length} pociągów · ${time}${overview}${describeSources(data.sources)}`;
+    const following = followed ? ` · śledzę ${followed.carrier} ${followed.number}` : "";
+    statusEl.textContent =
+      `${trainCountText(data.features.length)} · ${time}${overview}${following}${describeSources(data.sources)}`;
   } catch (err) {
     if (err.name === "AbortError") return;
     statusEl.textContent = `Błąd pobierania: ${err.message}`;
@@ -240,12 +384,176 @@ function debounce(fn, ms) {
   };
 }
 
-async function start() {
+const FOCUS_MIN_ZOOM = 13;
+const SEARCH_DEBOUNCE_MS = 350;
+const SEARCH_MIN_LENGTH = 2;
+const COMPASS_POINTS = [
+  "północ", "północny wschód", "wschód", "południowy wschód",
+  "południe", "południowy zachód", "zachód", "północny zachód",
+];
+
+const searchForm = document.getElementById("search-form");
+const searchInput = document.getElementById("search-input");
+const searchResultsEl = document.getElementById("search-results");
+let searchController = null;
+
+function compassPoint(bearing) {
+  return COMPASS_POINTS[Math.round(bearing / 45) % COMPASS_POINTS.length];
+}
+
+function clockTime(iso) {
+  return new Date(iso).toLocaleTimeString("pl-PL", { hour: "2-digit", minute: "2-digit" });
+}
+
+function currentPlaceText(p) {
+  const est = p.position.estimate;
+  if (!est) return "pozycja GPS";
+  if (p.status === "moving") return `${est.fromStop} → ${est.toStop}`;
+  if (p.status === "held") return `przed stacją ${est.toStop}`;
+  return `na stacji ${est.fromStop}`;
+}
+
+function positionText(result) {
+  switch (result.state) {
+    case "running": return currentPlaceText(result.train.properties);
+    case "not_started": return `odjazd ${clockTime(result.departure)}`;
+    case "finished": return `zakończył kurs o ${clockTime(result.arrival)}`;
+    default: return "odwołany";
+  }
+}
+
+function directionHtml(result) {
+  const bearing = result.train?.properties.bearing;
+  if (bearing == null) return "";
+  return `<span class="heading"><span class="heading-arrow" style="transform: rotate(${bearing}deg)">↑</span>
+    ${escapeHtml(compassPoint(bearing))}</span>`;
+}
+
+function delayHtml(result) {
+  const delay = result.train?.properties.delayMinutes;
+  if (!delay) return "";
+  return ` <span class="${delay >= LATE_THRESHOLD_MIN ? "late" : "muted"}">+${delay} min</span>`;
+}
+
+function resultItemHtml(result, index) {
+  const title = [result.category, result.number, result.name].filter(Boolean).join(" ");
+  return `<li><button type="button" class="result state-${result.state}" data-index="${index}">
+    <span class="result-title">${escapeHtml(title)}${delayHtml(result)}</span>
+    <span class="result-course">${escapeHtml(result.origin)} → ${escapeHtml(result.destination)}</span>
+    <span class="result-position">${escapeHtml(positionText(result))} ${directionHtml(result)}</span>
+  </button></li>`;
+}
+
+function showResults(results, message) {
+  searchResultsEl.hidden = false;
+  if (!results.length) {
+    searchResultsEl.innerHTML = `<li class="result-empty">${escapeHtml(message ?? "Brak pociągów o tej nazwie lub numerze.")}</li>`;
+    return;
+  }
+  searchResultsEl.innerHTML = results.map(resultItemHtml).join("");
+  searchResultsEl.querySelectorAll("button.result").forEach((button) => {
+    button.addEventListener("click", () => focusResult(results[Number(button.dataset.index)]));
+  });
+}
+
+function hideResults() {
+  searchResultsEl.hidden = true;
+  searchResultsEl.innerHTML = "";
+}
+
+function focusRunningTrain(feature) {
+  const [lon, lat] = feature.geometry.coordinates;
+  map.setView([lat, lon], Math.max(map.getZoom(), FOCUS_MIN_ZOOM));
+  selectTrain(feature);
+}
+
+function notRunningPopupHtml(result) {
+  const title = [result.category, result.number, result.name].filter(Boolean).join(" ");
+  return `<div class="popup">
+    <h2>${escapeHtml(title)}</h2>
+    <p class="muted">${escapeHtml(result.carrier)}</p>
+    <p>${escapeHtml(result.origin)} → ${escapeHtml(result.destination)}</p>
+    <p>${escapeHtml(positionText(result))}</p>
+    ${shareButtonHtml(result)}
+  </div>`;
+}
+
+async function focusNotRunningTrain(result) {
+  setSelectedTrain(result.trainId);
+  const route = await showRoute(result.trainId);
+  if (!route) return;
+  map.fitBounds(route.bounds, { padding: [30, 30] });
+  const [lon, lat] = route.stops[0].coordinates;
+  trainPopup.setLatLng([lat, lon]).setContent(notRunningPopupHtml(result)).openOn(map);
+}
+
+function focusResult(result) {
+  hideResults();
+  if (result.train) focusRunningTrain(result.train);
+  else focusNotRunningTrain(result);
+}
+
+async function fetchSearch(query) {
+  searchController?.abort();
+  searchController = new AbortController();
+  const res = await fetch(`/api/v1/search?q=${encodeURIComponent(query)}`, { signal: searchController.signal });
+  if (!res.ok) throw new Error(`HTTP ${res.status}`);
+  return (await res.json()).results;
+}
+
+async function runSearch({ focusIfUnambiguous }) {
+  const query = searchInput.value.trim();
+  urlState.write({ q: query });
+  if (query.length < SEARCH_MIN_LENGTH) return hideResults();
+  try {
+    const results = await fetchSearch(query);
+    const running = results.filter((r) => r.state === "running");
+    if (focusIfUnambiguous && running.length === 1) focusResult(running[0]);
+    else if (focusIfUnambiguous && results.length === 1) focusResult(results[0]);
+    else showResults(results);
+  } catch (err) {
+    if (err.name !== "AbortError") showResults([], `Błąd wyszukiwania: ${err.message}`);
+  }
+}
+
+searchForm.addEventListener("submit", (e) => {
+  e.preventDefault();
+  runSearch({ focusIfUnambiguous: true });
+});
+searchInput.addEventListener("input", debounce(() => runSearch({ focusIfUnambiguous: false }), SEARCH_DEBOUNCE_MS));
+searchInput.addEventListener("keydown", (e) => {
+  if (e.key === "Escape") hideResults();
+});
+
+async function focusSharedTrain(trainId) {
+  const res = await fetch(`/api/v1/trains/${encodeURIComponent(trainId)}`);
+  const summary = res.ok ? (await res.json()).summary : null;
+  if (summary) focusResult(summary);
+  else urlState.write({ train: null });
+}
+
+async function showInitialView(sharedView) {
+  if (sharedView) {
+    map.setView([sharedView.lat, sharedView.lon], sharedView.zoom, { animate: false });
+    return;
+  }
   statusEl.textContent = "Ustalam położenie…";
   const here = await userLocation();
   if (here) map.fitBounds(boundsAround(here, DEFAULT_RADIUS_KM), { animate: false });
+}
+
+async function start() {
+  const shared = urlState.read();
+  searchInput.value = shared.query;
+  const linkFocusesTrain = Boolean(shared.follow || shared.trainId);
+  if (shared.view || !linkFocusesTrain) await showInitialView(shared.view);
+  urlState.write(viewParams());
+  map.on("moveend", () => urlState.write(viewParams()));
   map.on("moveend", debounce(refresh, MOVE_DEBOUNCE_MS));
   refresh();
+  if (shared.follow) startFollowing(shared.follow);
+  else if (shared.trainId) focusSharedTrain(shared.trainId);
+  else if (shared.query) runSearch({ focusIfUnambiguous: !shared.view });
 }
 
 start();

@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import logging
 from contextlib import asynccontextmanager
-from datetime import datetime
+from datetime import date, datetime
 
 from fastapi import FastAPI, HTTPException, Query
 from fastapi.responses import JSONResponse
@@ -12,7 +12,7 @@ from . import service
 from .config import settings
 from .geo import BBox
 from .gps import SOURCES
-from .models import SourceInfo, TrainCollection
+from .models import SearchResponse, SearchResult, SourceInfo, TrainCollection
 from .static_db import NotReady
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s: %(message)s")
@@ -60,6 +60,25 @@ async def train(train_id: str, at: datetime | None = None):
     if detail is None:
         raise HTTPException(404, "Nie znaleziono kursu")
     return detail
+
+
+@app.get("/api/v1/search", response_model=SearchResponse)
+async def search(
+    q: str = Query(..., min_length=2, max_length=60, description="Nazwa lub numer pociągu, np. „szkuner”, „IC 3822”"),
+):
+    return {"query": q, "results": await service.search_trains(q)}
+
+
+@app.get("/api/v1/follow", response_model=SearchResult)
+async def follow(
+    carrier: str = Query(..., pattern=r"^[A-Za-z0-9]{1,8}$", description="Identyfikator przewoźnika, np. IC"),
+    number: str = Query(..., pattern=r"^[0-9]{1,6}$", description="Numer pociągu, np. 8312"),
+    service_date: date | None = Query(None, alias="date", description="Data kursu; bez niej – bieżący kurs"),
+):
+    result = await service.follow_train(carrier, number, service_date)
+    if result is None:
+        raise HTTPException(404, "Nie znaleziono pociągu")
+    return result
 
 
 @app.get("/api/v1/sources", response_model=list[SourceInfo])

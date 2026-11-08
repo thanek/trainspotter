@@ -9,7 +9,7 @@
   --forecast: #7c3aed;
   --schedule: #9ca3af;
   --late: #dc2626;
-  --route: #f59e0b;
+  --route: #06b6d4;
 }
 
 @media (prefers-color-scheme: dark) {
@@ -131,3 +131,78 @@ html, body {
 .train.basis-confirmed > * { fill: var(--confirmed); }
 .train.basis-forecast > * { fill: var(--forecast); }
 .train.basis-schedule > * { fill: var(--schedule); }
+
+.search { display: flex; gap: 6px; margin: 6px 0 8px; }
+
+.search input {
+  flex: 1;
+  min-width: 0;
+  padding: 6px 8px;
+  font: inherit;
+  color: var(--fg);
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+}
+
+.search button {
+  padding: 6px 10px;
+  font: inherit;
+  color: #ffffff;
+  background: var(--confirmed);
+  border: none;
+  border-radius: 6px;
+  cursor: pointer;
+}
+
+.search-results {
+  list-style: none;
+  margin: 0 0 8px;
+  padding: 0;
+  max-height: 50vh;
+  overflow-y: auto;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+}
+
+.search-results li + li { border-top: 1px solid var(--border); }
+
+.result {
+  display: grid;
+  gap: 1px;
+  width: 100%;
+  padding: 6px 8px;
+  text-align: left;
+  font: inherit;
+  font-size: 12px;
+  color: var(--fg);
+  background: none;
+  border: none;
+  cursor: pointer;
+}
+
+.result:hover, .result:focus-visible { background: rgba(37, 99, 235, 0.1); outline: none; }
+
+.result-title { font-weight: 600; font-size: 13px; }
+.result-course, .result-position { color: var(--muted); }
+.result.state-running .result-position { color: var(--fg); }
+.result.state-cancelled .result-title { text-decoration: line-through; }
+
+.result .late { color: var(--late); font-weight: 600; }
+.result .muted { color: var(--muted); font-weight: 400; }
+
+.result-empty { padding: 8px; font-size: 12px; color: var(--muted); }
+
+.heading { white-space: nowrap; color: var(--muted); }
+.heading-arrow { display: inline-block; font-weight: 700; color: var(--confirmed); }
+
+.share-button {
+  margin-top: 8px;
+  padding: 5px 10px;
+  font: inherit;
+  color: #ffffff;
+  background: var(--confirmed);
+  border: none;
+  border-radius: 6px;
+  cursor: pointer;
+}

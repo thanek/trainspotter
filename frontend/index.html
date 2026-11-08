@@ -9,9 +9,15 @@
 </head>
 <body>
   <div id="map"></div>
-  <aside class="panel" aria-live="polite">
+  <aside class="panel">
     <h1>Trainspotter</h1>
-    <p id="status">Ładowanie…</p>
+    <form id="search-form" class="search" role="search">
+      <input id="search-input" type="search" placeholder="Nazwa lub numer pociągu" aria-label="Szukaj pociągu"
+             autocomplete="off" spellcheck="false">
+      <button type="submit">Szukaj</button>
+    </form>
+    <ul id="search-results" class="search-results" hidden></ul>
+    <p id="status" aria-live="polite">Ładowanie…</p>
     <ul class="legend">
       <li><span class="dot gps"></span>GPS</li>
       <li><span class="dot confirmed"></span>Szacowana: potwierdzone przez PLK</li>

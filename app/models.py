@@ -68,6 +68,27 @@ class SourceInfo(BaseModel):
     detail: str | None = None
 
 
+class SearchResult(BaseModel):
+    trainId: str
+    serviceDate: str
+    number: str | None = None
+    name: str | None = None
+    carrier: str | None = None
+    carrierId: str | None = None
+    category: str | None = None
+    origin: str
+    destination: str
+    departure: str = Field(description="Odjazd ze stacji początkowej (rzeczywisty lub prognozowany, gdy znany)")
+    arrival: str
+    state: Literal["running", "not_started", "finished", "cancelled"]
+    train: TrainFeature | None = Field(None, description="Bieżąca pozycja; tylko dla state=running")
+
+
+class SearchResponse(BaseModel):
+    query: str
+    results: list[SearchResult]
+
+
 class TrainCollection(BaseModel):
     type: Literal["FeatureCollection"] = "FeatureCollection"
     generatedAt: str

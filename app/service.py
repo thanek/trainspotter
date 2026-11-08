@@ -6,6 +6,7 @@ import sqlite3
 import time
 from dataclasses import dataclass
 from datetime import date, datetime, timedelta
+from typing import Callable
 from zoneinfo import ZoneInfo
 
 from .config import settings
@@ -13,6 +14,7 @@ from .estimator import Estimate, StopPoint, build_detour_timeline, build_timelin
 from .geo import BBox, Polyline
 from .gps import SOURCES, GpsFix, GpsSource
 from .realtime import LiveSnapshot, LiveTrip, PlkLiveFeed
+from .search import TrainQuery, expand_slash_numbers
 from .static_db import NotReady, StaticData
 
 log = logging.getLogger(__name__)
@@ -322,6 +324,7 @@ def _detail(train_id: str, now: float, snapshot: LiveSnapshot | None) -> dict | 
             "detour": run.on_detour,
             "current": _point_feature(est.lat, est.lon, _estimated_properties(trip, service_date, tl, est))
             if est else None,
+            "summary": _search_result(run, tl, est, _run_state(tl, est, now, cancelled)) if len(tl) >= 2 else None,
             "stops": [_stop_view(s) for s in tl],
             "route": {"type": "LineString", "coordinates": route},
         }
@@ -335,3 +338,105 @@ async def train_detail(train_id: str, now: float | None = None) -> dict | None:
     except ValueError:
         return None
     return await asyncio.to_thread(_detail, train_id, now, await _usable_snapshot(now))
+
+
+SEARCH_RESULT_LIMIT = 30
+SEARCH_STATE_ORDER = {"running": 0, "not_started": 1, "finished": 2, "cancelled": 3}
+
+
+def _matching_runs(con: sqlite3.Connection, dates: list[date], snapshot: LiveSnapshot | None,
+                   predicate: Callable[[sqlite3.Row], bool]) -> list[_Run]:
+    runs = []
+    for d in dates:
+        service_date = d.strftime("%Y%m%d")
+        day_start = gtfs_service_day_start(d)
+        for trip in static.trains_on(con, service_date):
+            if predicate(trip):
+                live_trip = snapshot.match(trip["trip_id"], service_date, trip["agency_id"], trip["number"]) \
+                    if snapshot else None
+                runs.append(_Run(trip, service_date, day_start, live_trip))
+    return runs
+
+
+def _run_state(tl: list[StopPoint], est: Estimate | None, now: float, cancelled: bool) -> str:
+    if cancelled:
+        return "cancelled"
+    if est is not None:
+        return "running"
+    return "not_started" if now < tl[0].dep else "finished"
+
+
+def _search_result(run: _Run, tl: list[StopPoint], est: Estimate | None, state: str) -> dict:
+    trip = run.trip
+    return {
+        "trainId": run.train_id,
+        "serviceDate": _dashed(run.service_date),
+        "number": trip["number"],
+        "name": trip["name"],
+        "carrier": trip["agency_name"],
+        "carrierId": trip["agency_id"],
+        "category": trip["category"] or trip["route_short_name"],
+        "origin": tl[0].name,
+        "destination": trip["headsign"] or tl[-1].name,
+        "departure": iso(tl[0].dep),
+        "arrival": iso(tl[-1].arr),
+        "state": state,
+        "train": _point_feature(est.lat, est.lon, _estimated_properties(trip, run.service_date, tl, est))
+        if est else None,
+    }
+
+
+def _evaluate(con: sqlite3.Connection, runs: list[_Run], now: float) -> list[tuple[_Run, dict]]:
+    stops_by_trip = static.stop_times_for(con, {r.trip["trip_idx"] for r in runs})
+    evaluated = []
+    for run in runs:
+        tl = _timeline(con, run, stops_by_trip)
+        if len(tl) < 2:
+            continue
+        cancelled = bool(run.live and run.live.cancelled)
+        est = None if cancelled else estimate(tl, now, run.live is not None, _shape_for(con, run))
+        evaluated.append((run, _search_result(run, tl, est, _run_state(tl, est, now, cancelled))))
+    return evaluated
+
+
+def _by_relevance(result: dict) -> tuple:
+    return SEARCH_STATE_ORDER[result["state"]], result["departure"]
+
+
+def _search(query: TrainQuery, now: float, snapshot: LiveSnapshot | None) -> list[dict]:
+    today = datetime.fromtimestamp(now, TZ).strftime("%Y%m%d")
+
+    def matches(trip: sqlite3.Row) -> bool:
+        return query.matches(trip["name"], trip["number"], trip["category"])
+
+    with static.connect() as con:
+        runs = _matching_runs(con, _today_and_yesterday(now), snapshot, matches)
+        results = [r for run, r in _evaluate(con, runs, now) if r["state"] == "running" or run.service_date == today]
+    return sorted(results, key=_by_relevance)[:SEARCH_RESULT_LIMIT]
+
+
+def _follow(carrier_id: str, number: str, service_day: date | None, now: float,
+            snapshot: LiveSnapshot | None) -> dict | None:
+    def is_followed_train(trip: sqlite3.Row) -> bool:
+        return trip["agency_id"] == carrier_id and number in expand_slash_numbers(trip["number"])
+
+    dates = [service_day] if service_day else _today_and_yesterday(now)
+    with static.connect() as con:
+        results = [r for _, r in _evaluate(con, _matching_runs(con, dates, snapshot, is_followed_train), now)]
+    return min(results, key=_by_relevance, default=None)
+
+
+async def follow_train(carrier_id: str, number: str, service_day: date | None = None,
+                       now: float | None = None) -> dict | None:
+    _require_static()
+    now = now or time.time()
+    return await asyncio.to_thread(_follow, carrier_id, number, service_day, now, await _usable_snapshot(now))
+
+
+async def search_trains(raw_query: str, now: float | None = None) -> list[dict]:
+    _require_static()
+    now = now or time.time()
+    query = TrainQuery.parse(raw_query)
+    if not query.tokens:
+        return []
+    return await asyncio.to_thread(_search, query, now, await _usable_snapshot(now))

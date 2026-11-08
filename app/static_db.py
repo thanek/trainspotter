@@ -365,6 +365,16 @@ class StaticData:
         return con.execute(TRIP_SELECT + " WHERE t.trip_id = ?", (trip_id,)).fetchone()
 
     @staticmethod
+    def trains_on(con: sqlite3.Connection, service_date: str) -> list[sqlite3.Row]:
+        return con.execute(
+            TRIP_SELECT + """
+            JOIN service_dates sd ON sd.date = ? AND sd.service_id = t.service_id
+            WHERE r.route_type != ?
+            """,
+            (service_date, BUS_ROUTE_TYPE),
+        ).fetchall()
+
+    @staticmethod
     def runs_on(con: sqlite3.Connection, service_id: str, service_date: str) -> bool:
         return con.execute(
             "SELECT 1 FROM service_dates WHERE date=? AND service_id=?", (service_date, service_id)
