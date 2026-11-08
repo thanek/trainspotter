@@ -1,0 +1,26 @@
+<!doctype html>
+<html lang="pl">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Trainspotter</title>
+  <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css">
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <div id="map"></div>
+  <aside class="panel" aria-live="polite">
+    <h1>Trainspotter</h1>
+    <p id="status">Ładowanie…</p>
+    <ul class="legend">
+      <li><span class="dot gps"></span>GPS</li>
+      <li><span class="dot confirmed"></span>Szacowana: potwierdzone przez PLK</li>
+      <li><span class="dot forecast"></span>Szacowana: prognoza PLK</li>
+      <li><span class="dot schedule"></span>Szacowana: rozkład</li>
+      <li><span class="dot ring"></span>Opóźnienie ≥ 5 min</li>
+    </ul>
+  </aside>
+  <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+  <script src="app.js"></script>
+</body>
+</html>

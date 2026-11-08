@@ -1,0 +1,133 @@
+:root {
+  --bg: #ffffff;
+  --fg: #1f2328;
+  --muted: #59636e;
+  --panel-bg: rgba(255, 255, 255, 0.94);
+  --border: #d1d9e0;
+  --gps: #16a34a;
+  --confirmed: #2563eb;
+  --forecast: #7c3aed;
+  --schedule: #9ca3af;
+  --late: #dc2626;
+  --route: #f59e0b;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    --bg: #0d1117;
+    --fg: #e6edf3;
+    --muted: #9198a1;
+    --panel-bg: rgba(13, 17, 23, 0.92);
+    --border: #3d444d;
+  }
+}
+
+* { box-sizing: border-box; }
+
+html, body {
+  margin: 0;
+  height: 100%;
+  background: var(--bg);
+  color: var(--fg);
+  font: 14px/1.4 system-ui, -apple-system, "Segoe UI", sans-serif;
+}
+
+#map { position: absolute; inset: 0; }
+
+.panel {
+  position: absolute;
+  z-index: 1000;
+  top: 12px;
+  left: 12px;
+  max-width: calc(100% - 24px);
+  width: 290px;
+  padding: 10px 14px;
+  background: var(--panel-bg);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.15);
+}
+
+.panel h1 { margin: 0 0 4px; font-size: 16px; }
+
+#status { margin: 0 0 8px; color: var(--muted); }
+
+.legend { list-style: none; margin: 0; padding: 0; display: grid; gap: 3px; font-size: 12px; }
+
+.dot {
+  display: inline-block;
+  width: 11px;
+  height: 11px;
+  margin-right: 6px;
+  border-radius: 50%;
+  vertical-align: -1px;
+  border: 2px solid #fff;
+}
+
+.dot.gps { background: var(--gps); }
+.dot.confirmed { background: var(--confirmed); }
+.dot.forecast { background: var(--forecast); }
+.dot.schedule { background: var(--schedule); }
+.dot.ring { background: transparent; border-color: var(--late); }
+
+.leaflet-container { background: var(--bg); font: inherit; }
+
+.base-tiles { filter: grayscale(0.6) contrast(0.95); }
+
+.leaflet-popup-content-wrapper,
+.leaflet-popup-tip {
+  background: var(--panel-bg);
+  color: var(--fg);
+}
+
+.leaflet-popup-content { margin: 10px 14px; font-size: 13px; min-width: 220px; }
+
+.locate-button {
+  width: 34px;
+  height: 34px;
+  font-size: 18px;
+  line-height: 1;
+  cursor: pointer;
+  color: #1f2328;
+  background: #ffffff;
+  border: 2px solid rgba(0, 0, 0, 0.2);
+  border-radius: 4px;
+}
+
+.train-label {
+  padding: 0 4px;
+  font-size: 11px;
+  background: rgba(255, 255, 255, 0.85);
+  border: none;
+  box-shadow: none;
+}
+
+.train-label::before { display: none; }
+
+.popup h2 { margin: 0 0 2px; font-size: 14px; }
+.popup p { margin: 2px 0; }
+.popup .muted { color: var(--muted); }
+.popup .late { color: var(--late); font-weight: 600; }
+
+@media (max-width: 480px) {
+  .panel { width: auto; right: 12px; }
+  .legend { grid-template-columns: 1fr 1fr; }
+}
+
+.train-icon { background: none; border: none; }
+
+.train { overflow: visible; cursor: pointer; }
+
+.train .body,
+.train .arrow {
+  stroke: #ffffff;
+  stroke-width: 1.5;
+  stroke-linejoin: round;
+}
+
+.train.late .body { stroke: var(--late); stroke-width: 3; }
+
+.train.basis-gps > * { fill: var(--gps); }
+.train.basis-confirmed > * { fill: var(--confirmed); }
+.train.basis-forecast > * { fill: var(--forecast); }
+.train.basis-schedule > * { fill: var(--schedule); }

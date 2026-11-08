@@ -1,0 +1,12 @@
+services:
+  trainspotter:
+    build: .
+    image: trainspotter:latest
+    ports:
+      - "8000:8000"
+    volumes:
+      - trainspotter-data:/data
+    restart: unless-stopped
+
+volumes:
+  trainspotter-data:
