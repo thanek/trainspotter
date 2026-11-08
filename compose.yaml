@@ -3,7 +3,7 @@ services:
     build: .
     image: trainspotter:latest
     ports:
-      - "8000:8000"
+      - "8811:8811"
     volumes:
       - trainspotter-data:/data
     restart: unless-stopped
