@@ -48,7 +48,7 @@ L.tileLayer("https://{s}.tiles.openrailwaymap.org/standard/{z}/{x}/{y}.png", {
 const LocateControl = L.Control.extend({
   options: { position: "topright" },
   onAdd() {
-    const button = L.DomUtil.create("button", "locate-button");
+    const button = L.DomUtil.create("button", "map-button");
     button.type = "button";
     button.title = "Pokaż moje okolice";
     button.textContent = "◎";
@@ -700,10 +700,14 @@ async function refreshRouteDialog() {
   routeStopsEl.scrollTop = scrollTop;
 }
 
-routeDialog.querySelector(".dialog-close").addEventListener("click", () => routeDialog.close());
-routeDialog.addEventListener("click", (e) => {
-  if (e.target === routeDialog) routeDialog.close();
-});
+function bindDialogClosing(dialog) {
+  dialog.querySelector(".dialog-close").addEventListener("click", () => dialog.close());
+  dialog.addEventListener("click", (e) => {
+    if (e.target === dialog) dialog.close();
+  });
+}
+
+document.querySelectorAll(".app-dialog").forEach(bindDialogClosing);
 routeDialog.addEventListener("close", () => { routeDialogTrainId = null; });
 document.addEventListener("click", (e) => {
   const button = e.target.closest(".route-button");
@@ -794,5 +798,75 @@ panelToggle.addEventListener("click", () => {
 });
 
 setPanelCollapsed(readStoredPanelCollapsed() ?? isNarrowScreen());
+const installDialog = document.getElementById("install-dialog");
+const IS_APPLE_MOBILE = /iPad|iPhone|iPod/.test(navigator.userAgent)
+  || (navigator.platform === "MacIntel" && navigator.maxTouchPoints > 1);
+const INSTALL_ICON_SVG = `<svg viewBox="0 0 24 24" width="20" height="20" aria-hidden="true" fill="none"
+  stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+  <path d="M12 3v11M7.5 9.5 12 14l4.5-4.5M5 15v4a1 1 0 0 0 1 1h12a1 1 0 0 0 1-1v-4"/></svg>`;
+let deferredInstallPrompt = null;
+
+function runsAsInstalledApp() {
+  return window.matchMedia("(display-mode: standalone)").matches || navigator.standalone === true;
+}
+
+function canOfferInstall() {
+  return !runsAsInstalledApp() && (deferredInstallPrompt !== null || IS_APPLE_MOBILE);
+}
+
+async function installApp() {
+  if (!deferredInstallPrompt) {
+    installDialog.showModal();
+    return;
+  }
+  const installPrompt = deferredInstallPrompt;
+  deferredInstallPrompt = null;
+  await installPrompt.prompt();
+  await installPrompt.userChoice;
+  updateInstallButton();
+}
+
+const InstallControl = L.Control.extend({
+  options: { position: "bottomleft" },
+  onAdd() {
+    const button = L.DomUtil.create("button", "map-button");
+    button.type = "button";
+    button.title = "Zainstaluj aplikację";
+    button.setAttribute("aria-label", "Zainstaluj aplikację");
+    button.innerHTML = INSTALL_ICON_SVG;
+    L.DomEvent.disableClickPropagation(button);
+    button.addEventListener("click", installApp);
+    return button;
+  },
+});
+const installControl = new InstallControl().addTo(map);
+
+function trackAttributionHeight() {
+  const attribution = map.attributionControl.getContainer();
+  const publishHeight = () => {
+    document.documentElement.style.setProperty("--attribution-height", `${attribution.offsetHeight}px`);
+  };
+  new ResizeObserver(publishHeight).observe(attribution);
+  publishHeight();
+}
+
+trackAttributionHeight();
+
+function updateInstallButton() {
+  installControl.getContainer().hidden = !canOfferInstall();
+}
+
+window.addEventListener("beforeinstallprompt", (e) => {
+  // Suppress Chrome's own install banner; the map button offers install instead.
+  e.preventDefault();
+  deferredInstallPrompt = e;
+  updateInstallButton();
+});
+window.addEventListener("appinstalled", () => {
+  deferredInstallPrompt = null;
+  updateInstallButton();
+});
+updateInstallButton();
+
 registerServiceWorker();
 start();

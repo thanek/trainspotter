@@ -46,8 +46,8 @@
     </ul>
     </div>
   </aside>
-  <dialog id="route-dialog" class="route-dialog" aria-labelledby="route-title">
-    <header class="route-header">
+  <dialog id="route-dialog" class="app-dialog" aria-labelledby="route-title">
+    <header class="dialog-header">
       <div>
         <h2 id="route-title"></h2>
         <p id="route-subtitle" class="muted"></p>
@@ -59,6 +59,33 @@
       <span class="delay-badge on-time forecast">prognoza</span>
     </p>
     <ol id="route-stops" class="route-stops"></ol>
+  </dialog>
+  <dialog id="install-dialog" class="app-dialog" aria-labelledby="install-title">
+    <header class="dialog-header">
+      <div>
+        <h2 id="install-title">Zainstaluj Trainspotter</h2>
+        <p class="muted">Na iPhonie i iPadzie aplikację dodaje się z menu udostępniania przeglądarki.</p>
+      </div>
+      <button type="button" class="dialog-close" aria-label="Zamknij">×</button>
+    </header>
+    <ol class="install-steps">
+      <li>
+        <svg class="step-icon" viewBox="0 0 24 24" aria-hidden="true">
+          <path d="M12 3v12M7.5 7.5 12 3l4.5 4.5M6 11H5v10h14V11h-1"/>
+        </svg>
+        <span>Stuknij <strong>Udostępnij</strong>: w Safari na dolnym pasku, w Brave lub Chrome w menu przeglądarki.</span>
+      </li>
+      <li>
+        <svg class="step-icon" viewBox="0 0 24 24" aria-hidden="true">
+          <rect x="4" y="4" width="16" height="16" rx="4"/><path d="M12 8v8M8 12h8"/>
+        </svg>
+        <span>Przewiń listę i wybierz <strong>Do ekranu początkowego</strong>.</span>
+      </li>
+      <li>
+        <img class="step-icon" src="icons/icon-192.png" alt="">
+        <span>Stuknij <strong>Dodaj</strong>. Ikona Trainspotter pojawi się na ekranie głównym.</span>
+      </li>
+    </ol>
   </dialog>
   <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
   <script src="app.js"></script>
