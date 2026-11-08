@@ -577,6 +577,7 @@ function focusStation(station) {
 function focusEntry(entry) {
   if (entry.station) focusStation(entry.station);
   else focusResult(entry.train);
+  if (isNarrowScreen()) setPanelCollapsed(true);
 }
 
 function unambiguousEntry(found) {
@@ -755,5 +756,43 @@ function registerServiceWorker() {
 window.addEventListener("offline", () => { statusEl.textContent = "Brak połączenia z internetem – dane nie są aktualne."; });
 window.addEventListener("online", () => refresh());
 
+const PANEL_COLLAPSED_KEY = "trainspotter.panelCollapsed";
+const NARROW_SCREEN_QUERY = window.matchMedia("(max-width: 600px)");
+const panelEl = document.getElementById("panel");
+const panelToggle = document.getElementById("panel-toggle");
+
+function isNarrowScreen() {
+  return NARROW_SCREEN_QUERY.matches;
+}
+
+function readStoredPanelCollapsed() {
+  try {
+    const stored = localStorage.getItem(PANEL_COLLAPSED_KEY);
+    return stored === null ? null : stored === "true";
+  } catch {
+    return null;
+  }
+}
+
+function storePanelCollapsed(collapsed) {
+  try {
+    localStorage.setItem(PANEL_COLLAPSED_KEY, String(collapsed));
+  } catch {
+    // Storage may be blocked; remembering the panel state is optional.
+  }
+}
+
+function setPanelCollapsed(collapsed) {
+  panelEl.classList.toggle("collapsed", collapsed);
+  panelToggle.setAttribute("aria-expanded", String(!collapsed));
+}
+
+panelToggle.addEventListener("click", () => {
+  const collapsed = !panelEl.classList.contains("collapsed");
+  setPanelCollapsed(collapsed);
+  storePanelCollapsed(collapsed);
+});
+
+setPanelCollapsed(readStoredPanelCollapsed() ?? isNarrowScreen());
 registerServiceWorker();
 start();

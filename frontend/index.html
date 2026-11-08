@@ -19,8 +19,17 @@
 </head>
 <body>
   <div id="map"></div>
-  <aside class="panel">
-    <h1>Trainspotter</h1>
+  <aside class="panel" id="panel">
+    <div class="panel-header">
+      <button type="button" id="panel-toggle" class="panel-toggle" aria-controls="panel-body" aria-expanded="true"
+              aria-label="Pokaż lub ukryj wyszukiwarkę">
+        <svg viewBox="0 0 24 24" width="20" height="20" aria-hidden="true">
+          <path d="M4 6h16M4 12h16M4 18h16" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"/>
+        </svg>
+      </button>
+      <h1>Trainspotter</h1>
+    </div>
+    <div id="panel-body" class="panel-body">
     <form id="search-form" class="search" role="search">
       <input id="search-input" type="search" placeholder="Pociąg lub stacja" aria-label="Szukaj pociągu lub stacji"
              autocomplete="off" spellcheck="false">
@@ -35,6 +44,7 @@
       <li><span class="dot schedule"></span>Szacowana: rozkład</li>
       <li><span class="dot ring"></span>Opóźnienie ≥ 5 min</li>
     </ul>
+    </div>
   </aside>
   <dialog id="route-dialog" class="route-dialog" aria-labelledby="route-title">
     <header class="route-header">

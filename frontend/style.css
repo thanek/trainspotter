@@ -110,7 +110,7 @@ html, body {
 .popup .late { color: var(--late); font-weight: 600; }
 
 @media (max-width: 480px) {
-  .panel { width: auto; right: 12px; }
+  .panel { width: auto; right: calc(60px + env(safe-area-inset-right)); }
   .legend { grid-template-columns: 1fr 1fr; }
 }
 
@@ -377,3 +377,27 @@ html, body {
 
 .leaflet-top.leaflet-right { margin-top: env(safe-area-inset-top); margin-right: env(safe-area-inset-right); }
 .leaflet-bottom { margin-bottom: env(safe-area-inset-bottom); }
+
+.panel-header { display: flex; align-items: center; gap: 8px; }
+.panel-header h1 { margin: 0; }
+.panel-body { margin-top: 4px; }
+
+.panel-toggle {
+  display: grid;
+  place-items: center;
+  width: 34px;
+  height: 34px;
+  flex: none;
+  padding: 0;
+  color: var(--fg);
+  background: transparent;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  cursor: pointer;
+}
+
+.panel-toggle:hover { background: rgba(127, 127, 127, 0.12); }
+
+.panel.collapsed { width: auto; right: auto; padding: 6px; }
+.panel.collapsed h1,
+.panel.collapsed .panel-body { display: none; }
