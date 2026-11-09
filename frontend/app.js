@@ -66,6 +66,7 @@ new LocateControl().addTo(map);
 const trainsLayer = L.layerGroup().addTo(map);
 const routeLayer = L.layerGroup().addTo(map);
 const routeStopsLayer = L.layerGroup().addTo(map);
+map.createPane("routeStops").style.zIndex = 550;
 const trainPopup = L.popup({ offset: [0, -4], autoPan: false });
 let selectedTrainId = null;
 
@@ -135,7 +136,7 @@ function trainShareUrl(train) {
 }
 
 function stationShareUrl(station) {
-  return appUrl({ station: station.stationId });
+  return station.stationId ? appUrl({ station: station.stationId }) : null;
 }
 
 function popupHtml(p) {
@@ -208,6 +209,23 @@ function stopLabelHtml(stop, index, count) {
   return `${escapeHtml(stop.name)}${time ? ` <span class="stop-time">${clockTime(time)}</span>` : ""}`;
 }
 
+const STOP_HIT_AREA_PX = 32;
+
+function routeStopIcon(stop, i, count, progress, showAllLabels) {
+  const passed = progress === "passed";
+  const nearTrain = progress === "current" || progress === "next";
+  const highlighted = nearTrain || i === 0 || i === count - 1;
+  const classes = ["stop-dot", passed && "passed", nearTrain && "near-train", highlighted && "highlighted"]
+    .filter(Boolean).join(" ");
+  const label = showAllLabels || highlighted
+    ? `<span class="stop-label${passed ? " passed" : ""}">${stopLabelHtml(stop, i, count)}</span>` : "";
+  return L.divIcon({
+    className: "route-stop-icon",
+    html: `<span class="${classes}"></span>${label}`,
+    iconSize: [STOP_HIT_AREA_PX, STOP_HIT_AREA_PX],
+  });
+}
+
 function drawRouteStops() {
   routeStopsLayer.clearLayers();
   if (!routeStops) return;
@@ -216,22 +234,11 @@ function drawRouteStops() {
   const showAllLabels = map.getZoom() >= STOP_LABELS_MIN_ZOOM;
   routeStops.forEach((stop, i) => {
     const [lon, lat] = stop.coordinates;
-    const passed = progress[i] === "passed";
-    const nearTrain = progress[i] === "current" || progress[i] === "next";
-    const highlighted = nearTrain || i === 0 || i === count - 1;
-    const marker = L.circleMarker([lat, lon], {
-      radius: highlighted ? 6 : 4,
-      weight: 2,
-      color: color(passed ? "--schedule" : "--route"),
-      fillColor: color(nearTrain ? "--route" : "--bg"),
-      fillOpacity: 1,
-      interactive: false,
-    });
-    if (showAllLabels || highlighted) {
-      marker.bindTooltip(stopLabelHtml(stop, i, count), {
-        permanent: true, direction: "right", offset: [8, 0], className: `stop-label${passed ? " passed" : ""}`,
-      });
-    }
+    const icon = routeStopIcon(stop, i, count, progress[i], showAllLabels);
+    const marker = L.marker([lat, lon], { icon, pane: "routeStops", keyboard: false, title: stop.name });
+    // Without a preclick listener Leaflet closes the train popup (and the route) before the click arrives.
+    marker.on("preclick", L.DomEvent.stopPropagation);
+    marker.on("click", () => openRouteStopStation(stop));
     routeStopsLayer.addLayer(marker);
   });
 }
@@ -355,11 +362,13 @@ function selectTrain(feature) {
   showRoute(selectedTrainId);
 }
 
+let keepRouteForStation = false;
+
 trainPopup.on("remove", () => {
   clearAutoFilledSearchInput();
   stopFollowing();
   setSelectedTrain(null);
-  clearRoute();
+  if (!keepRouteForStation) clearRoute();
 });
 
 function directionArrow(radius, bearing) {
@@ -612,6 +621,10 @@ const stationPopup = L.popup({ offset: [0, -4] });
 stationPopup.on("remove", () => {
   clearAutoFilledSearchInput();
   urlState.write({ station: null });
+  if (keepRouteForStation) {
+    keepRouteForStation = false;
+    clearRoute();
+  }
 });
 
 function stationPopupHtml(station) {
@@ -622,13 +635,31 @@ function stationPopupHtml(station) {
   </div>`;
 }
 
-function focusStation(station) {
-  hideResults();
+function showStationPopup(station) {
   const [lon, lat] = station.coordinates;
-  map.setView([lat, lon], STATION_ZOOM);
   stationPopup.setLatLng([lat, lon]).setContent(stationPopupHtml(station)).openOn(map);
   showInSearchInput(station.name);
   urlState.write({ station: station.stationId });
+}
+
+function focusStation(station) {
+  hideResults();
+  if (keepRouteForStation) {
+    keepRouteForStation = false;
+    clearRoute();
+  }
+  const [lon, lat] = station.coordinates;
+  map.setView([lat, lon], STATION_ZOOM);
+  showStationPopup(station);
+}
+
+async function openRouteStopStation(stop) {
+  const res = stop.stationId ? await fetch(`/api/v1/stations/${encodeURIComponent(stop.stationId)}`) : null;
+  const station = res?.ok ? await res.json() : { stationId: null, name: stop.name, coordinates: stop.coordinates };
+  if (!routeStops) return;
+  hideResults();
+  keepRouteForStation = true;
+  showStationPopup(station);
 }
 
 function focusEntry(entry) {

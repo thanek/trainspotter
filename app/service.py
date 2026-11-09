@@ -307,9 +307,14 @@ def _time_basis(stop: StopPoint, has_live: bool) -> str:
     return "forecast" if has_live else "schedule"
 
 
-def _stop_view(s: StopPoint, progress: str, has_live: bool) -> dict:
+def _station_ids(con: sqlite3.Connection, tl: list[StopPoint]) -> dict[str, str]:
+    rows = static.stops_by_id(con, [s.stop_id for s in tl])
+    return {stop_id: r["parent_station"] or stop_id for stop_id, r in rows.items()}
+
+
+def _stop_view(s: StopPoint, progress: str, has_live: bool, station_id: str | None) -> dict:
     return {
-        "stopId": s.stop_id, "name": s.name, "coordinates": [s.lon, s.lat],
+        "stopId": s.stop_id, "stationId": station_id, "name": s.name, "coordinates": [s.lon, s.lat],
         "scheduledArrival": iso(s.scheduled_arr), "scheduledDeparture": iso(s.scheduled_dep),
         "arrival": iso(s.arr), "departure": iso(s.dep), "confirmed": s.confirmed,
         "arrivalDelayMinutes": _delay_minutes(s.arr, s.scheduled_arr),
@@ -334,6 +339,7 @@ def _detail(train_id: str, now: float, snapshot: LiveSnapshot | None) -> dict | 
         route = shape.coordinates() if shape is not None else [[round(s.lon, 6), round(s.lat, 6)] for s in tl]
         state = _run_state(tl, est, now, cancelled)
         progress = stop_progress(len(tl), est, finished=state == "finished")
+        station_ids = _station_ids(con, tl)
         return {
             "trainId": train_id,
             "cancelled": cancelled,
@@ -341,7 +347,8 @@ def _detail(train_id: str, now: float, snapshot: LiveSnapshot | None) -> dict | 
             "current": _point_feature(est.lat, est.lon, _estimated_properties(trip, service_date, tl, est))
             if est else None,
             "summary": _search_result(run, tl, est, state) if len(tl) >= 2 else None,
-            "stops": [_stop_view(s, p, live_trip is not None) for s, p in zip(tl, progress)],
+            "stops": [_stop_view(s, p, live_trip is not None, station_ids.get(s.stop_id))
+                      for s, p in zip(tl, progress)],
             "route": {"type": "LineString", "coordinates": route},
         }
 
