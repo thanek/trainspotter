@@ -65,6 +65,7 @@ new LocateControl().addTo(map);
 
 const trainsLayer = L.layerGroup().addTo(map);
 const routeLayer = L.layerGroup().addTo(map);
+const routeStopsLayer = L.layerGroup().addTo(map);
 const trainPopup = L.popup({ offset: [0, -4], autoPan: false });
 let selectedTrainId = null;
 
@@ -193,8 +194,61 @@ document.addEventListener("click", async (e) => {
   setTimeout(() => { button.textContent = "Udostępnij"; }, SHARE_FEEDBACK_MS);
 });
 
-async function showRoute(trainId) {
+const STOP_LABELS_MIN_ZOOM = 11;
+let routeStops = null;
+
+function clearRoute() {
+  routeStops = null;
   routeLayer.clearLayers();
+  routeStopsLayer.clearLayers();
+}
+
+function stopLabelHtml(stop, index, count) {
+  const time = index === count - 1 ? stop.arrival : stop.departure;
+  return `${escapeHtml(stop.name)}${time ? ` <span class="stop-time">${clockTime(time)}</span>` : ""}`;
+}
+
+function drawRouteStops() {
+  routeStopsLayer.clearLayers();
+  if (!routeStops) return;
+  const progress = displayProgress(routeStops);
+  const count = routeStops.length;
+  const showAllLabels = map.getZoom() >= STOP_LABELS_MIN_ZOOM;
+  routeStops.forEach((stop, i) => {
+    const [lon, lat] = stop.coordinates;
+    const passed = progress[i] === "passed";
+    const nearTrain = progress[i] === "current" || progress[i] === "next";
+    const highlighted = nearTrain || i === 0 || i === count - 1;
+    const marker = L.circleMarker([lat, lon], {
+      radius: highlighted ? 6 : 4,
+      weight: 2,
+      color: color(passed ? "--schedule" : "--route"),
+      fillColor: color(nearTrain ? "--route" : "--bg"),
+      fillOpacity: 1,
+      interactive: false,
+    });
+    if (showAllLabels || highlighted) {
+      marker.bindTooltip(stopLabelHtml(stop, i, count), {
+        permanent: true, direction: "right", offset: [8, 0], className: `stop-label${passed ? " passed" : ""}`,
+      });
+    }
+    routeStopsLayer.addLayer(marker);
+  });
+}
+
+async function refreshRouteStops() {
+  const trainId = selectedTrainId;
+  if (!routeStops || !trainId) return;
+  const detail = await fetchTrainDetail(trainId);
+  if (!detail || selectedTrainId !== trainId || !routeStops) return;
+  routeStops = detail.stops;
+  drawRouteStops();
+}
+
+map.on("zoomend", drawRouteStops);
+
+async function showRoute(trainId) {
+  clearRoute();
   if (trainId.startsWith("gps:")) return null;
   const res = await fetch(`/api/v1/trains/${encodeURIComponent(trainId)}`);
   if (!res.ok || selectedTrainId !== trainId) return null;
@@ -202,6 +256,8 @@ async function showRoute(trainId) {
   const latLngs = detail.route.coordinates.map(([lon, lat]) => [lat, lon]);
   const line = L.polyline(latLngs, { color: color("--route"), weight: 6, opacity: 0.85, interactive: false });
   line.addTo(routeLayer);
+  routeStops = detail.stops;
+  drawRouteStops();
   return { bounds: line.getBounds(), stops: detail.stops };
 }
 
@@ -303,7 +359,7 @@ trainPopup.on("remove", () => {
   clearAutoFilledSearchInput();
   stopFollowing();
   setSelectedTrain(null);
-  routeLayer.clearLayers();
+  clearRoute();
 });
 
 function directionArrow(radius, bearing) {
@@ -380,6 +436,7 @@ async function refresh() {
   try {
     if (followed?.trainId) await trackFollowedTrain().catch(() => null);
     refreshRouteDialog().catch(() => null);
+    refreshRouteStops().catch(() => null);
     const res = await fetch(`/api/v1/trains?bbox=${bboxParam()}`, { signal: inFlight.signal });
     if (res.status === 503) {
       statusEl.textContent = "Importuję rozkład jazdy…";

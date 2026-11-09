@@ -449,3 +449,16 @@ img.step-icon { padding: 0; border: none; }
 @media (max-width: 600px) {
   .leaflet-bottom.leaflet-left { bottom: var(--attribution-height, 0px); }
 }
+
+.stop-label {
+  padding: 0 5px;
+  font-size: 11px;
+  color: var(--fg);
+  background: var(--panel-bg);
+  border: 1px solid var(--border);
+  box-shadow: none;
+}
+
+.stop-label::before { display: none; }
+.stop-label.passed { color: var(--muted); }
+.stop-label .stop-time { color: var(--muted); font-variant-numeric: tabular-nums; }
