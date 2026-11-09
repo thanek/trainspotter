@@ -196,9 +196,11 @@ document.addEventListener("click", async (e) => {
 });
 
 const STOP_LABELS_MIN_ZOOM = 8;
+let routeTrainId = null;
 let routeStops = null;
 
 function clearRoute() {
+  routeTrainId = null;
   routeStops = null;
   routeLayer.clearLayers();
   routeStopsLayer.clearLayers();
@@ -236,29 +238,31 @@ function drawRouteStops() {
     const [lon, lat] = stop.coordinates;
     const icon = routeStopIcon(stop, i, count, progress[i], showAllLabels);
     const marker = L.marker([lat, lon], { icon, pane: "routeStops", keyboard: false, title: stop.name });
-    // Without a preclick listener Leaflet closes the train popup (and the route) before the click arrives.
-    marker.on("preclick", L.DomEvent.stopPropagation);
     marker.on("click", () => openRouteStopStation(stop));
     routeStopsLayer.addLayer(marker);
   });
 }
 
 async function refreshRouteStops() {
-  const trainId = selectedTrainId;
+  const trainId = routeTrainId;
   if (!routeStops || !trainId) return;
   const detail = await fetchTrainDetail(trainId);
-  if (!detail || selectedTrainId !== trainId || !routeStops) return;
+  if (!detail || routeTrainId !== trainId) return;
   routeStops = detail.stops;
   drawRouteStops();
 }
 
 map.on("zoomend", drawRouteStops);
+map.on("click", function clearRouteOnBareMapClick() {
+  clearRoute();
+});
 
 async function showRoute(trainId) {
   clearRoute();
   if (trainId.startsWith("gps:")) return null;
+  routeTrainId = trainId;
   const res = await fetch(`/api/v1/trains/${encodeURIComponent(trainId)}`);
-  if (!res.ok || selectedTrainId !== trainId) return null;
+  if (!res.ok || routeTrainId !== trainId) return null;
   const detail = await res.json();
   const latLngs = detail.route.coordinates.map(([lon, lat]) => [lat, lon]);
   const line = L.polyline(latLngs, { color: color("--route"), weight: 6, opacity: 0.85, interactive: false });
@@ -362,13 +366,10 @@ function selectTrain(feature) {
   showRoute(selectedTrainId);
 }
 
-let keepRouteForStation = false;
-
 trainPopup.on("remove", () => {
   clearAutoFilledSearchInput();
   stopFollowing();
   setSelectedTrain(null);
-  if (!keepRouteForStation) clearRoute();
 });
 
 function directionArrow(radius, bearing) {
@@ -624,10 +625,6 @@ stationPopup.on("remove", () => {
   popupStation = null;
   clearAutoFilledSearchInput();
   urlState.write({ station: null });
-  if (keepRouteForStation) {
-    keepRouteForStation = false;
-    clearRoute();
-  }
 });
 
 function boardTimeHtml(entry) {
@@ -661,11 +658,17 @@ function boardRowHtml(entry) {
   </button></li>`;
 }
 
-// board: undefined = loading, null = failed, false = not available for this station.
+const BOARD_LOADING = "loading";
+const BOARD_FAILED = "failed";
+const BOARD_UNAVAILABLE = "unavailable";
+const BOARD_STATUS_TEXT = {
+  [BOARD_LOADING]: "Ładowanie najbliższych pociągów…",
+  [BOARD_FAILED]: "Nie udało się pobrać najbliższych pociągów.",
+};
+
 function stationBoardHtml(board) {
-  if (board === false) return "";
-  if (board === undefined) return `<p class="muted board-status">Ładowanie najbliższych pociągów…</p>`;
-  if (board === null) return `<p class="muted board-status">Nie udało się pobrać najbliższych pociągów.</p>`;
+  if (board === BOARD_UNAVAILABLE) return "";
+  if (board in BOARD_STATUS_TEXT) return `<p class="muted board-status">${BOARD_STATUS_TEXT[board]}</p>`;
   if (!board.departures.length) return `<p class="muted board-status">Brak pociągów w najbliższych 4 godzinach.</p>`;
   return `<h3 class="board-title">Najbliższe pociągi</h3>
     <ul class="board">${board.departures.map(boardRowHtml).join("")}</ul>`;
@@ -683,19 +686,24 @@ function stationPopupHtml(station, board) {
 async function fetchStationBoard(stationId) {
   try {
     const res = await fetch(`/api/v1/stations/${encodeURIComponent(stationId)}/departures`);
-    return res.ok ? await res.json() : null;
+    return res.ok ? await res.json() : BOARD_FAILED;
   } catch {
-    return null;
+    return BOARD_FAILED;
   }
+}
+
+function setContentWithoutPanning(popup, html) {
+  popup.options.autoPan = false;
+  popup.setContent(html);
+  popup.options.autoPan = true;
 }
 
 async function loadStationBoard(station, { isRefresh = false } = {}) {
   const board = await fetchStationBoard(station.stationId);
-  if (popupStation !== station || (isRefresh && board === null)) return;
-  // A periodic refresh must not pan the map back to a popup the user scrolled away from.
-  stationPopup.options.autoPan = !isRefresh;
-  stationPopup.setContent(stationPopupHtml(station, board));
-  stationPopup.options.autoPan = true;
+  if (popupStation !== station || (isRefresh && board === BOARD_FAILED)) return;
+  const html = stationPopupHtml(station, board);
+  if (isRefresh) setContentWithoutPanning(stationPopup, html);
+  else stationPopup.setContent(html);
 }
 
 function refreshStationBoard() {
@@ -719,7 +727,7 @@ document.addEventListener("click", (e) => {
 function showStationPopup(station) {
   const [lon, lat] = station.coordinates;
   popupStation = station;
-  const board = station.stationId ? undefined : false;
+  const board = station.stationId ? BOARD_LOADING : BOARD_UNAVAILABLE;
   stationPopup.setLatLng([lat, lon]).setContent(stationPopupHtml(station, board)).openOn(map);
   if (station.stationId) loadStationBoard(station);
   showInSearchInput(station.name);
@@ -728,10 +736,6 @@ function showStationPopup(station) {
 
 function focusStation(station) {
   hideResults();
-  if (keepRouteForStation) {
-    keepRouteForStation = false;
-    clearRoute();
-  }
   const [lon, lat] = station.coordinates;
   map.setView([lat, lon], STATION_ZOOM);
   showStationPopup(station);
@@ -742,7 +746,6 @@ async function openRouteStopStation(stop) {
   const station = res?.ok ? await res.json() : { stationId: null, name: stop.name, coordinates: stop.coordinates };
   if (!routeStops) return;
   hideResults();
-  keepRouteForStation = true;
   showStationPopup(station);
 }
 

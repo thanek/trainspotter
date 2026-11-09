@@ -407,8 +407,7 @@ class StaticData:
 
     @staticmethod
     def calls_at_station(con: sqlite3.Connection, station_id: str, service_date: str,
-                         from_s: float, to_s: float) -> list[sqlite3.Row]:
-        """Trips stopping at the station (any of its platforms) with departure in [from_s, to_s]."""
+                         departure_from_s: float, departure_to_s: float) -> list[sqlite3.Row]:
         return con.execute(
             """
             SELECT t.*, r.agency_id, r.route_type, r.short_name AS route_short_name, a.name AS agency_name,
@@ -420,10 +419,11 @@ class StaticData:
             LEFT JOIN agencies a ON a.agency_id = r.agency_id
             JOIN service_dates sd ON sd.date = :d AND sd.service_id = t.service_id
             WHERE (s.stop_id = :station OR s.parent_station = :station)
-              AND st.dep_s BETWEEN :from_s AND :to_s
+              AND st.dep_s BETWEEN :departure_from_s AND :departure_to_s
               AND r.route_type != :bus
             """,
-            {"station": station_id, "d": service_date, "from_s": from_s, "to_s": to_s, "bus": BUS_ROUTE_TYPE},
+            {"station": station_id, "d": service_date, "bus": BUS_ROUTE_TYPE,
+             "departure_from_s": departure_from_s, "departure_to_s": departure_to_s},
         ).fetchall()
 
     @staticmethod

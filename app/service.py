@@ -452,10 +452,13 @@ STATION_BOARD_LIMIT = 8
 STATION_BOARD_LOOKAHEAD_S = 4 * 3600
 
 
+def _is_call_at(stop: StopPoint, stop_id: str, scheduled_dep: float) -> bool:
+    detour_stop_without_schedule = stop.scheduled_dep is None
+    return stop.stop_id == stop_id and (detour_stop_without_schedule or stop.scheduled_dep == scheduled_dep)
+
+
 def _call_index(tl: list[StopPoint], stop_id: str, scheduled_dep: float) -> int | None:
-    # A trip may call at a station twice; the scheduled time tells the calls apart (detours have none).
-    return next((i for i, s in enumerate(tl)
-                 if s.stop_id == stop_id and s.scheduled_dep in (None, scheduled_dep)), None)
+    return next((i for i, stop in enumerate(tl) if _is_call_at(stop, stop_id, scheduled_dep)), None)
 
 
 def _board_entry(run: _Run, static_stops: list, tl: list[StopPoint], idx: int | None,
