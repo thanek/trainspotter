@@ -4,7 +4,7 @@ const GEOLOCATION_TIMEOUT_MS = 5000;
 const REFRESH_INTERVAL_MS = 20000;
 const MOVE_DEBOUNCE_MS = 300;
 const LATE_THRESHOLD_MIN = 5;
-const LABELS_MIN_ZOOM = 12;
+const LABELS_MIN_ZOOM = 10;
 const KM_PER_DEGREE_LAT = 111.32;
 
 const statusEl = document.getElementById("status");
@@ -195,7 +195,7 @@ document.addEventListener("click", async (e) => {
   setTimeout(() => { button.textContent = "Udostępnij"; }, SHARE_FEEDBACK_MS);
 });
 
-const STOP_LABELS_MIN_ZOOM = 11;
+const STOP_LABELS_MIN_ZOOM = 8;
 let routeStops = null;
 
 function clearRoute() {
@@ -446,6 +446,7 @@ async function refresh() {
     if (followed?.trainId) await trackFollowedTrain().catch(() => null);
     refreshRouteDialog().catch(() => null);
     refreshRouteStops().catch(() => null);
+    refreshStationBoard().catch(() => null);
     const res = await fetch(`/api/v1/trains?bbox=${bboxParam()}`, { signal: inFlight.signal });
     if (res.status === 503) {
       statusEl.textContent = "Importuję rozkład jazdy…";
@@ -617,8 +618,10 @@ function focusResult(result) {
 }
 
 const STATION_ZOOM = 15;
-const stationPopup = L.popup({ offset: [0, -4] });
+const stationPopup = L.popup({ offset: [0, -4], className: "station-popup", minWidth: 280, maxWidth: 340 });
+let popupStation = null;
 stationPopup.on("remove", () => {
+  popupStation = null;
   clearAutoFilledSearchInput();
   urlState.write({ station: null });
   if (keepRouteForStation) {
@@ -627,17 +630,98 @@ stationPopup.on("remove", () => {
   }
 });
 
-function stationPopupHtml(station) {
+function boardTimeHtml(entry) {
+  if (entry.status === "cancelled") return `<s>${clockTime(entry.scheduledTime)}</s>`;
+  const scheduled = entry.delayMinutes ? `<s>${clockTime(entry.scheduledTime)}</s>` : "";
+  return `${clockTime(entry.time)}${scheduled}`;
+}
+
+function boardBadgeHtml(entry) {
+  if (entry.status === "cancelled") return `<span class="delay-badge late">odwołany</span>`;
+  if (entry.timeBasis === "schedule" || entry.delayMinutes == null) return "";
+  return delayBadgeHtml(entry.delayMinutes, entry.timeBasis);
+}
+
+function boardNoteHtml(entry) {
+  if (entry.status === "at_station") return `<span class="board-note">na stacji</span>`;
+  if (entry.kind === "arrival") return `<span class="board-note">przyjazd</span>`;
+  return "";
+}
+
+function boardRowHtml(entry) {
+  const train = [entry.category, entry.number].filter(Boolean).join(" ");
+  const direction = entry.kind === "arrival" ? `z: ${entry.origin}` : `→ ${entry.destination}`;
+  return `<li><button type="button" class="board-row ${entry.status}" data-train-id="${escapeHtml(entry.trainId)}">
+    <span class="board-time">${boardTimeHtml(entry)}</span>
+    <span class="board-main">
+      <span class="board-train"><strong>${escapeHtml(train)}</strong> ${escapeHtml(entry.name ?? "")}</span>
+      <span class="board-direction">${escapeHtml(direction)}</span>
+    </span>
+    <span class="board-extra">${boardBadgeHtml(entry)}${boardNoteHtml(entry)}</span>
+  </button></li>`;
+}
+
+// board: undefined = loading, null = failed, false = not available for this station.
+function stationBoardHtml(board) {
+  if (board === false) return "";
+  if (board === undefined) return `<p class="muted board-status">Ładowanie najbliższych pociągów…</p>`;
+  if (board === null) return `<p class="muted board-status">Nie udało się pobrać najbliższych pociągów.</p>`;
+  if (!board.departures.length) return `<p class="muted board-status">Brak pociągów w najbliższych 4 godzinach.</p>`;
+  return `<h3 class="board-title">Najbliższe pociągi</h3>
+    <ul class="board">${board.departures.map(boardRowHtml).join("")}</ul>`;
+}
+
+function stationPopupHtml(station, board) {
   return `<div class="popup">
     <h2>${escapeHtml(station.name)}</h2>
     <p class="muted">stacja kolejowa</p>
+    ${stationBoardHtml(board)}
     ${shareButtonHtml(stationShareUrl(station))}
   </div>`;
 }
 
+async function fetchStationBoard(stationId) {
+  try {
+    const res = await fetch(`/api/v1/stations/${encodeURIComponent(stationId)}/departures`);
+    return res.ok ? await res.json() : null;
+  } catch {
+    return null;
+  }
+}
+
+async function loadStationBoard(station, { isRefresh = false } = {}) {
+  const board = await fetchStationBoard(station.stationId);
+  if (popupStation !== station || (isRefresh && board === null)) return;
+  // A periodic refresh must not pan the map back to a popup the user scrolled away from.
+  stationPopup.options.autoPan = !isRefresh;
+  stationPopup.setContent(stationPopupHtml(station, board));
+  stationPopup.options.autoPan = true;
+}
+
+function refreshStationBoard() {
+  if (popupStation?.stationId) return loadStationBoard(popupStation, { isRefresh: true });
+  return Promise.resolve();
+}
+
+async function openBoardTrain(trainId) {
+  const detail = await fetchTrainDetail(trainId);
+  if (!detail?.summary) return;
+  stationPopup.close();
+  if (detail.current) focusRunningTrain(detail.current);
+  else focusNotRunningTrain(detail.summary);
+}
+
+document.addEventListener("click", (e) => {
+  const row = e.target.closest(".board-row");
+  if (row) openBoardTrain(row.dataset.trainId);
+});
+
 function showStationPopup(station) {
   const [lon, lat] = station.coordinates;
-  stationPopup.setLatLng([lat, lon]).setContent(stationPopupHtml(station)).openOn(map);
+  popupStation = station;
+  const board = station.stationId ? undefined : false;
+  stationPopup.setLatLng([lat, lon]).setContent(stationPopupHtml(station, board)).openOn(map);
+  if (station.stationId) loadStationBoard(station);
   showInSearchInput(station.name);
   urlState.write({ station: station.stationId });
 }

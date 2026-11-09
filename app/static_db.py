@@ -40,7 +40,7 @@ CREATE TABLE shapes(shape_id TEXT PRIMARY KEY, data BLOB);
 CREATE VIRTUAL TABLE trip_rtree USING rtree(trip_idx, min_lon, max_lon, min_lat, max_lat);
 """
 
-SCHEMA_VERSION = "2"
+SCHEMA_VERSION = "3"
 
 STATIONS_FROM_RAIL_STOP_TIMES = """
 INSERT INTO stations
@@ -258,6 +258,7 @@ def build_database(zip_path: Path, db_path: Path) -> None:
             coords = _import_reference_tables(con, zf)
             trip_idx = _import_trips(con, zf)
             _import_stop_times(con, zf, trip_idx, coords)
+            con.execute("CREATE INDEX stop_times_by_stop ON stop_times(stop_id, dep_s)")
             _import_shapes(con, zf)
             con.execute(STATIONS_FROM_RAIL_STOP_TIMES, (BUS_ROUTE_TYPE,))
             feed_version = next((r.get("feed_version") for r in _rows(zf, "feed_info.txt")), None)
@@ -402,6 +403,27 @@ class StaticData:
             WHERE r.route_type != ?
             """,
             (service_date, BUS_ROUTE_TYPE),
+        ).fetchall()
+
+    @staticmethod
+    def calls_at_station(con: sqlite3.Connection, station_id: str, service_date: str,
+                         from_s: float, to_s: float) -> list[sqlite3.Row]:
+        """Trips stopping at the station (any of its platforms) with departure in [from_s, to_s]."""
+        return con.execute(
+            """
+            SELECT t.*, r.agency_id, r.route_type, r.short_name AS route_short_name, a.name AS agency_name,
+                   st.stop_id AS call_stop_id, st.dep_s AS call_dep_s
+            FROM stops s
+            JOIN stop_times st ON st.stop_id = s.stop_id
+            JOIN trips t ON t.trip_idx = st.trip_idx
+            JOIN routes r ON r.route_id = t.route_id
+            LEFT JOIN agencies a ON a.agency_id = r.agency_id
+            JOIN service_dates sd ON sd.date = :d AND sd.service_id = t.service_id
+            WHERE (s.stop_id = :station OR s.parent_station = :station)
+              AND st.dep_s BETWEEN :from_s AND :to_s
+              AND r.route_type != :bus
+            """,
+            {"station": station_id, "d": service_date, "from_s": from_s, "to_s": to_s, "bus": BUS_ROUTE_TYPE},
         ).fetchall()
 
     @staticmethod

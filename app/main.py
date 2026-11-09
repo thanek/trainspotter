@@ -92,6 +92,14 @@ async def station(station_id: str):
     return detail
 
 
+@app.get("/api/v1/stations/{station_id}/departures")
+async def station_departures(station_id: str, limit: int = Query(8, ge=1, le=30)):
+    board = await service.station_board(station_id, limit)
+    if board is None:
+        raise HTTPException(404, "Nie znaleziono stacji")
+    return board
+
+
 @app.get("/api/v1/sources", response_model=list[SourceInfo])
 async def sources():
     return service.sources_status()

@@ -448,6 +448,93 @@ def _station(station_id: str) -> dict | None:
         return _station_info(station) if station else None
 
 
+STATION_BOARD_LIMIT = 8
+STATION_BOARD_LOOKAHEAD_S = 4 * 3600
+
+
+def _call_index(tl: list[StopPoint], stop_id: str, scheduled_dep: float) -> int | None:
+    # A trip may call at a station twice; the scheduled time tells the calls apart (detours have none).
+    return next((i for i, s in enumerate(tl)
+                 if s.stop_id == stop_id and s.scheduled_dep in (None, scheduled_dep)), None)
+
+
+def _board_entry(run: _Run, static_stops: list, tl: list[StopPoint], idx: int | None,
+                 scheduled_dep: float, status: str) -> dict:
+    trip = run.trip
+    call = tl[idx] if idx is not None else None
+    arrival = idx is not None and idx == len(tl) - 1
+    scheduled = (call.scheduled_arr if arrival else call.scheduled_dep) if call else scheduled_dep
+    actual = (call.arr if arrival else call.dep) if call and status != "cancelled" else None
+    return {
+        "trainId": run.train_id,
+        "number": trip["number"],
+        "name": trip["name"],
+        "category": trip["category"] or trip["route_short_name"],
+        "carrier": trip["agency_name"],
+        "carrierId": trip["agency_id"],
+        "origin": static_stops[0].name if static_stops else None,
+        "destination": trip["headsign"] or (static_stops[-1].name if static_stops else None),
+        "kind": "arrival" if arrival else "departure",
+        "scheduledTime": iso(scheduled if scheduled is not None else scheduled_dep),
+        "time": iso(actual),
+        "delayMinutes": _delay_minutes(actual, scheduled) if actual is not None else None,
+        "timeBasis": _time_basis(call, run.live is not None) if call else "schedule",
+        "status": status,
+    }
+
+
+def _station_board(station_id: str, now: float, snapshot: LiveSnapshot | None, limit: int) -> dict | None:
+    with static.connect() as con:
+        if static.station(con, station_id) is None:
+            return None
+        today = datetime.fromtimestamp(now, TZ).date()
+        calls = []
+        for d in (today - timedelta(days=1), today, today + timedelta(days=1)):
+            day_start = gtfs_service_day_start(d)
+            service_date = d.strftime("%Y%m%d")
+            rows = static.calls_at_station(con, station_id, service_date,
+                                           now - day_start - settings.max_assumed_delay_s,
+                                           now - day_start + STATION_BOARD_LOOKAHEAD_S)
+            for row in rows:
+                live_trip = snapshot.match(row["trip_id"], service_date, row["agency_id"], row["number"]) \
+                    if snapshot else None
+                calls.append((_Run(row, service_date, day_start, live_trip), row["call_stop_id"],
+                              day_start + row["call_dep_s"]))
+        stops_by_trip = static.stop_times_for(con, {run.trip["trip_idx"] for run, _, _ in calls})
+        entries = []
+        for run, stop_id, scheduled_dep in calls:
+            static_stops = stops_by_trip.get(run.trip["trip_idx"], [])
+            if run.live is not None and run.live.cancelled:
+                if now <= scheduled_dep <= now + STATION_BOARD_LOOKAHEAD_S:
+                    entries.append(_board_entry(run, static_stops, [], None, scheduled_dep, "cancelled"))
+                continue
+            tl = _timeline(con, run, stops_by_trip)
+            if len(tl) < 2:
+                continue
+            idx = _call_index(tl, stop_id, scheduled_dep)
+            if idx is None:
+                if run.live is not None and not run.on_detour and now <= scheduled_dep:
+                    entries.append(_board_entry(run, static_stops, tl, None, scheduled_dep, "cancelled"))
+                continue
+            est = estimate(tl, now, run.live is not None, None)
+            state = _run_state(tl, est, now, cancelled=False)
+            progress = stop_progress(len(tl), est, finished=state == "finished")[idx]
+            terminated_here = idx == len(tl) - 1 and progress == "current"
+            if progress == "passed" or terminated_here or tl[idx].arr > now + STATION_BOARD_LOOKAHEAD_S:
+                continue
+            entries.append(_board_entry(run, static_stops, tl, idx, scheduled_dep,
+                                        "at_station" if progress == "current" else "upcoming"))
+    entries.sort(key=lambda e: (e["time"] or e["scheduledTime"], e["trainId"]))
+    return {"stationId": station_id, "generatedAt": iso(now), "departures": entries[:limit]}
+
+
+async def station_board(station_id: str, limit: int = STATION_BOARD_LIMIT,
+                        now: float | None = None) -> dict | None:
+    _require_static()
+    now = now or time.time()
+    return await asyncio.to_thread(_station_board, station_id, now, await _usable_snapshot(now), limit)
+
+
 async def station_detail(station_id: str) -> dict | None:
     _require_static()
     return await asyncio.to_thread(_station, station_id)
