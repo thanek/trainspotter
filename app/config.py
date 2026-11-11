@@ -21,6 +21,7 @@ def _default_frontend_dir() -> str:
 class Settings:
     data_dir: Path = field(default_factory=lambda: Path(_env("DATA_DIR", "data")))
     frontend_dir: Path = field(default_factory=lambda: Path(_env("FRONTEND_DIR", _default_frontend_dir())))
+    app_variant: str = field(default_factory=lambda: _env("APP_VARIANT", "prod"))
 
     gtfs_url: str = field(default_factory=lambda: _env("GTFS_URL", "https://mkuran.pl/gtfs/polish_trains.zip"))
     static_max_age_s: float = field(default_factory=lambda: _env_float("STATIC_MAX_AGE_S", 24 * 3600))

@@ -1,12 +1,13 @@
 from __future__ import annotations
 
+import json
 import logging
 import mimetypes
 from contextlib import asynccontextmanager
 from datetime import date, datetime
 
 from fastapi import FastAPI, HTTPException, Query
-from fastapi.responses import JSONResponse
+from fastapi.responses import JSONResponse, Response
 from fastapi.staticfiles import StaticFiles
 
 from . import service
@@ -103,6 +104,30 @@ async def station_departures(station_id: str, limit: int = Query(8, ge=1, le=30)
 @app.get("/api/v1/sources", response_model=list[SourceInfo])
 async def sources():
     return service.sources_status()
+
+
+DEV_MANIFEST_OVERRIDES = {
+    "name": "Trainspotter DEV – pociągi na żywo",
+    "short_name": "Trainspotter DEV",
+    "theme_color": "#ea580c",
+    "icons": [
+        {"src": "icons/dev/icon-192.png", "sizes": "192x192", "type": "image/png", "purpose": "any"},
+        {"src": "icons/dev/icon-512.png", "sizes": "512x512", "type": "image/png", "purpose": "any"},
+        {"src": "icons/dev/icon-maskable-512.png", "sizes": "512x512", "type": "image/png", "purpose": "maskable"},
+        {"src": "icons/dev/icon.svg", "sizes": "any", "type": "image/svg+xml", "purpose": "any"},
+    ],
+}
+
+
+def app_manifest(base: dict, variant: str) -> dict:
+    return {**base, **DEV_MANIFEST_OVERRIDES} if variant == "dev" else base
+
+
+@app.get("/manifest.webmanifest", include_in_schema=False)
+async def manifest():
+    base = json.loads((settings.frontend_dir / "manifest.webmanifest").read_text(encoding="utf-8"))
+    body = json.dumps(app_manifest(base, settings.app_variant), ensure_ascii=False)
+    return Response(body, media_type="application/manifest+json")
 
 
 if settings.frontend_dir.is_dir():

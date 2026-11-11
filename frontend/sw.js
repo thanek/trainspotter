@@ -1,4 +1,4 @@
-const SHELL_CACHE = "trainspotter-shell-v2";
+const SHELL_CACHE = "trainspotter-shell-v3";
 const LIBRARY_CACHE = "trainspotter-libraries-v1";
 const KNOWN_CACHES = [SHELL_CACHE, LIBRARY_CACHE];
 

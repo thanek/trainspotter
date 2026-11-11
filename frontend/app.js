@@ -1036,12 +1036,147 @@ window.addEventListener("beforeinstallprompt", (e) => {
   e.preventDefault();
   deferredInstallPrompt = e;
   updateInstallButton();
+  forgetAppUse();
 });
 window.addEventListener("appinstalled", () => {
   deferredInstallPrompt = null;
   updateInstallButton();
+  rememberAppUse();
+  offerOpeningLinksInApp();
 });
 updateInstallButton();
 
+const APP_LAST_USED_KEY = "trainspotter.appLastUsed";
+const OPEN_IN_APP_HINT_DISMISSED_KEY = "trainspotter.openInAppHintDismissed";
+const OPEN_IN_APP_HINT_SHOWN_IN_APP_KEY = "trainspotter.openInAppHintShownInApp";
+const RECENT_APP_USE_MS = 30 * 24 * 60 * 60 * 1000;
+const openInAppHint = document.getElementById("open-in-app-hint");
+
+function readStorage(key) {
+  try {
+    return localStorage.getItem(key);
+  } catch {
+    return null;
+  }
+}
+
+function writeStorage(key, value) {
+  try {
+    localStorage.setItem(key, value);
+  } catch {
+    return;
+  }
+}
+
+function rememberAppUse() {
+  writeStorage(APP_LAST_USED_KEY, String(Date.now()));
+}
+
+function forgetAppUse() {
+  openInAppHint.hidden = true;
+  try {
+    localStorage.removeItem(APP_LAST_USED_KEY);
+  } catch {
+    return;
+  }
+}
+
+function appUsedRecently() {
+  const lastUsed = Number(readStorage(APP_LAST_USED_KEY));
+  return lastUsed > 0 && Date.now() - lastUsed < RECENT_APP_USE_MS;
+}
+
+async function relatedAppInstalled() {
+  if (!navigator.getInstalledRelatedApps) return false;
+  try {
+    const apps = await navigator.getInstalledRelatedApps();
+    return apps.some((app) => app.platform === "webapp");
+  } catch {
+    return false;
+  }
+}
+
+const COPY_SETTINGS_URL_LABEL = "Kopiuj adres ustawień";
+const COPY_FEEDBACK_MS = 4000;
+const copySettingsUrlButton = document.getElementById("copy-settings-url");
+
+function browserAppsSettingsUrl() {
+  const ua = navigator.userAgent;
+  if (/Edg\//.test(ua)) return "edge://apps";
+  if (/Vivaldi\//.test(ua)) return "vivaldi://apps";
+  if (navigator.brave) return "brave://apps";
+  return "chrome://apps";
+}
+
+function browserTabSteps(settingsUrl) {
+  return `Aby linki do Trainspottera otwierały się w aplikacji zamiast w przeglądarce, otwórz stronę
+    <code>${settingsUrl}</code>, przejdź do ustawień aplikacji Trainspotter i włącz opcję otwierania
+    obsługiwanych linków. Tę stronę otworzysz w aplikacji ikoną w pasku adresu.`;
+}
+
+function appWindowSteps(settingsUrl) {
+  return `Aby linki do Trainspottera otwierały się w tym oknie zamiast w przeglądarce, otwórz ustawienia
+    aplikacji z jej menu (⋮) albo wpisz w przeglądarce <code>${settingsUrl}</code> i przejdź do ustawień
+    Trainspottera, a potem włącz opcję otwierania obsługiwanych linków.`;
+}
+
+function selectSettingsUrl() {
+  const range = document.createRange();
+  range.selectNodeContents(openInAppHint.querySelector("code"));
+  const selection = window.getSelection();
+  selection.removeAllRanges();
+  selection.addRange(range);
+}
+
+async function copySettingsUrl(settingsUrl) {
+  if (await copyToClipboard(settingsUrl).catch(() => false)) {
+    copySettingsUrlButton.textContent = "Skopiowano – wklej w pasek adresu";
+  } else {
+    selectSettingsUrl();
+    copySettingsUrlButton.textContent = "Zaznaczono – skopiuj Ctrl+C";
+  }
+  setTimeout(() => { copySettingsUrlButton.textContent = COPY_SETTINGS_URL_LABEL; }, COPY_FEEDBACK_MS);
+}
+
+function showOpenInAppHint(steps) {
+  const settingsUrl = browserAppsSettingsUrl();
+  document.getElementById("open-in-app-steps").innerHTML = steps(settingsUrl);
+  copySettingsUrlButton.onclick = () => copySettingsUrl(settingsUrl);
+  openInAppHint.hidden = false;
+}
+
+async function offerOpeningLinksInApp() {
+  if (readStorage(OPEN_IN_APP_HINT_DISMISSED_KEY)) return;
+  if (runsAsInstalledApp()) {
+    if (readStorage(OPEN_IN_APP_HINT_SHOWN_IN_APP_KEY)) return;
+    writeStorage(OPEN_IN_APP_HINT_SHOWN_IN_APP_KEY, "true");
+    showOpenInAppHint(appWindowSteps);
+    return;
+  }
+  if (!(await relatedAppInstalled()) && !appUsedRecently()) return;
+  showOpenInAppHint(browserTabSteps);
+}
+
+openInAppHint.querySelector(".dialog-close").addEventListener("click", () => {
+  openInAppHint.hidden = true;
+  writeStorage(OPEN_IN_APP_HINT_DISMISSED_KEY, "true");
+});
+window.matchMedia("(display-mode: standalone)").addEventListener("change", (e) => {
+  if (!e.matches) return;
+  openInAppHint.hidden = true;
+  rememberAppUse();
+  offerOpeningLinksInApp();
+});
+if (runsAsInstalledApp()) rememberAppUse();
+offerOpeningLinksInApp();
+
+async function applyManifestBranding() {
+  const manifest = await fetch("manifest.webmanifest").then((res) => res.json()).catch(() => null);
+  if (!manifest) return;
+  document.title = manifest.short_name;
+  document.querySelector('meta[name="theme-color"]').content = manifest.theme_color;
+}
+
+applyManifestBranding();
 registerServiceWorker();
 start();
